@@ -60,7 +60,7 @@ function Get-SkillDirs {
   }
 }
 
-function Get-LinkName($rel) { $rel -replace '[\/]', '-' }
+function Get-LinkName($rel) { $rel.Replace('\', '-').Replace('/', '-') }
 
 function Get-Description($skillDir) {
   $f = Join-Path $skillDir 'SKILL.md'
