@@ -1,14 +1,15 @@
 # Agent Skills
 
-Two skills for coding agents. Provider-agnostic: a skill is a folder with a
+Three skills for coding agents. Provider-agnostic: a skill is a folder with a
 `SKILL.md` inside, which is all any tool needs.
 
 | Skill | What it does |
 | --- | --- |
 | [`audit`](audit/SKILL.md) | Whole-repo code audit ending in a verdict — Approved / Approved with cleanup / Not approved — and a written report under `docs/audits/`. Read-only except the report. |
 | [`standup`](standup/SKILL.md) | Project-state brief: what got done, what is open, what to pick up next. Reads the repo's local tracker (`.scratch/`) and git. Read-only, answers in chat. |
+| [`ticket-flow`](ticket-flow/SKILL.md) | The one-ticket-at-a-time build loop: stage 1 specifies, stage 2 implements test-first on a branch named for the id, stage 3 reviews and merges. Dispatches a bare ticket id on its `Stage:` line. Needs a repo with a local tracker (`docs/agents/issue-tracker.md`) and a bindings block in `AGENTS.md`. |
 
-Both are user-invoked (`/audit`, `/standup`), never fired automatically.
+All three are user-invoked (`/audit`, `/standup`, `/ticket-flow` or a bare ticket id), never fired automatically.
 
 ## Install
 
