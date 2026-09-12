@@ -83,6 +83,7 @@ for wide refactors and the approval quiz are why it is being called.
     # <AREA>-<NNN>: <Ticket title>
     Stage: to-implement
     Blocked by: <the ids that gate this one, or "none">
+    Review: agent | human
 
     - Primary files:
       - <path the ticket may touch> (<scope, when the whole file is not in play>)
@@ -108,7 +109,7 @@ for wide refactors and the approval quiz are why it is being called.
 
     ## Comments
 
-Four additions, and each earns its place:
+Five additions, and each earns its place:
 
 - **The id.** `<AREA>-<NNN>`, **unique across the whole repo** and **immutable** —
   it is the address every ledger line, commit message and review block cites. The
@@ -125,6 +126,10 @@ Four additions, and each earns its place:
   implementer may touch those files and nothing else. Keep it to the files in
   play, never an implementation plan.
 - **Numbered criteria**, not checkboxes, so a review can fail "criterion 5" by name.
+- **`Review:`.** Who clicks merge. `agent` (the default when the line is missing)
+  lets stage 3 merge an approved PR itself; `human` holds the PR for the person.
+  Stage 1 sets it when writing the ticket — the author decides what they want to
+  see, not the reviewer.
 
 Also per effort directory: `ledger.md`, a `| Data | ID | Commit |` table of closed
 tickets, one line each, written when a ticket reaches `done`.
@@ -204,8 +209,50 @@ Stage 3 closes by appending a `#### Resolution (YYYY-MM-DD)` block to the ticket
 decision, files, red-green proof, gate output — and adding the ledger line, in the
 same commit as `Stage: done`. **The ticket is the memory between sessions.**
 
-Merge: if stage 3 changed no code, it merges directly and sets `done`. If it
-changed code, it opens the PR, sets `to-merge`, and stops.
+Merge, always through a PR so the trail is readable afterwards:
+
+1. Rebase the branch onto the base branch, gate green, push, `gh pr create`.
+2. Post the review as one PR comment. **Its first line is the verdict**:
+   `Approve`, or `Needs your call: <one sentence why>`. The findings follow.
+3. `Review: agent` and the verdict is `Approve`: wait for CI
+   (`gh pr checks --watch`), then `gh pr merge --merge --delete-branch`, pull the
+   base branch, set `done` there with the ledger line. Never squash.
+4. `Review: human`, or the verdict is `Needs your call`: set `to-merge`, leave
+   the PR open, stop.
+
+"Needs your call" is for anything the reviewer is not confident about, including
+a small fix it made itself that it would rather have a human glance at. A wrong
+"Approve" costs more than a held PR.
+
+## Unattended runs
+
+`scripts/ticket-loop.ps1 <repo>` feeds bare ids to `claude -p`, one at a time,
+and reads `Stage:` back. It adds no instructions of its own: everything a session
+does, it does because this file says so. Nobody is watching, so:
+
+- **A question is a `blocked`.** There is no one to answer "which do you want?".
+  Stage 2 that needs a decision (a seam the ticket does not name, a blank the
+  spec left) touches nothing, sets `Stage: blocked` with the question under
+  `## Comments`, commits, and stops; the driver moves on to the next ticket and
+  lists every open question at the end of the run. Stage 3 that is unsure posts `Needs your call` and sets `to-merge`; it
+  never ends at `reviewing` asking whether to open the PR.
+- **One stage per session.** Stage 2 stops the moment `to-review` is committed;
+  it does not review its own work. Stage 3 stops at `done`, `to-merge`,
+  `to-implement` or `blocked`, nothing else.
+
+Answering is a stage-1 job, done once per batch: read the "Decisions needed"
+list, fold each answer into the ticket body (Primary files, a criterion, a
+filled blank), set `to-implement`, commit on the base branch, run the driver
+again. A `to-merge` PR is answered on GitHub: merge it, or comment and reopen.
+
+Two conventions the driver relies on:
+
+- A failed stage-2 run leaves `Attempt N failed: <reason>` under `## Comments`,
+  committed on the branch. A session that finds one is a retry: read it first.
+  After the second, the driver sets `blocked`.
+- It appends one line per ticket to `<tracker>/run-log.md`. That log is what
+  happened while nobody watched; `/standup` reads the tracker for where things
+  stand now.
 
 ## A repo with no bindings block
 
