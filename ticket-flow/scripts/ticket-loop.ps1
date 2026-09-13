@@ -39,11 +39,13 @@ $Model2 = [regex]::Match($block, 'stage 2 (\w+)').Groups[1].Value.ToLower()
 $Model3 = [regex]::Match($block, 'stage 3 (\w+)').Groups[1].Value.ToLower()
 if (-not ($Gate -and $Base -and $Model2 -and $Model3)) { throw "Bindings block incomplete:`n$block" }
 $GateCmd = ($Gate -split ' ')[0]
-$Allowed = ('Bash(git *)', 'Bash(gh *)', "Bash($GateCmd *)", 'Bash(npx *)', 'Read', 'Edit', 'Write', 'Glob', 'Grep' | ForEach-Object { "`"$_`"" }) -join ' '
+# Prefix form `Bash(x:*)`, not glob `Bash(x *)`: measured 2026-09-12, `Bash(npx *)`
+# was denied while `Bash(npx:*)` ran.
+$Allowed = ('Bash(git:*)', 'Bash(gh:*)', "Bash(${GateCmd}:*)", 'Bash(npx:*)', 'Read', 'Edit', 'Write', 'Glob', 'Grep' | ForEach-Object { "`"$_`"" }) -join ' '
 
 # --- local-only files (never dirty the tree) -----------------------------------
-$RunLog = Join-Path $Tracker 'run-log.md'
-$RunDir = Join-Path $Tracker 'run-log'
+$RunLog = Join-Path $Repo "$Tracker/run-log.md"
+$RunDir = Join-Path $Repo "$Tracker/run-log"
 $exclude = '.git/info/exclude'
 foreach ($p in "$Tracker/run-log.md", "$Tracker/run-log/") {
   if (-not (Select-String -Path $exclude -Pattern ([regex]::Escape($p)) -Quiet)) { Add-Content $exclude $p }
@@ -66,14 +68,14 @@ function Field($text, $name) { [regex]::Match($text, "(?m)^$name`:\s*(.+?)\s*$")
 function Ticket($file) {
   $rel = (Resolve-Path -Relative $file) -replace '^\.[\\/]', '' -replace '\\', '/'
   $text = Get-Content $file -Raw -Encoding UTF8
-  $id = [regex]::Match(($text -split "`n")[0], '[A-ZÉ]+-\d+').Value
+  $id = [regex]::Match(($text -split "`n")[0], '[A-ZÉ][A-Z0-9É]*-\d+').Value
   $branch = $id.ToLower()
   # Stage lives on the ticket's branch until merge: read it there if unmerged.
   # ...except `blocked` on the base branch, which is the driver parking it: that wins.
   if ($id -and (Field $text 'Stage') -ne 'blocked' -and (git branch --list $branch) -and -not (git branch --merged $Base --list $branch)) {
     $text = (git show "${branch}:$rel" 2>$null) -join "`n"
   }
-  $blocked = (Field $text 'Blocked by') -split '[,\s]+' | Where-Object { $_ -match '^[A-ZÉ]+-\d+$' }
+  $blocked = (Field $text 'Blocked by') -split '[,\s]+' | Where-Object { $_ -match '^[A-ZÉ][A-Z0-9É]*-\d+$' }
   $last = ([regex]::Matches($text, '(?m)^- .+$') | Select-Object -Last 1).Value
   [pscustomobject]@{ Id = $id; File = $rel; Branch = $branch; Stage = (Field $text 'Stage'); BlockedBy = $blocked; LastComment = $last }
 }
@@ -105,7 +107,15 @@ function RunStage($t, $model, $minutes, $label) {
   if ($p.ExitCode -ne 0 -and (Get-Item $log).Length -lt 300) {
     throw "claude failed to start:`n$(Get-Content $log -Raw)`n$(Get-Content "$log.err" -Raw)"
   }
-  return 'exit ' + $p.ExitCode
+  $code = $p.ExitCode; $p.Dispose()
+  return 'exit ' + $(if ($null -eq $code) { '?' } else { $code })
+}
+
+# The session's last words, one line: when stage 2 stops to ask, this is the question.
+function LogTail($log, $chars = 1200) {
+  $text = [IO.File]::ReadAllText($log)   # not Get-Content: works while the redirect handle is still open
+  if ($text.Length -gt $chars) { $text = '...' + $text.Substring($text.Length - $chars) }
+  ($text -replace '\r?\n', ' / ').Trim()
 }
 
 # Back to a clean base branch; drop the ticket's branch if asked.
@@ -121,7 +131,10 @@ function Note($t, $line, $stage) {
   $text = $text.TrimEnd() + "`n`n- $(Get-Date -Format yyyy-MM-dd) $line`n"
   if ($stage) { $text = $text -replace '(?m)^Stage: .+$', "Stage: $stage" }
   [IO.File]::WriteAllText((Join-Path $Repo $t.File), $text, [Text.UTF8Encoding]::new($false))
-  GitOk add $t.File; GitOk commit -q -m "chore: $line ($($t.Id))" | Out-Null
+  # -F, not -m: a log tail with quotes or `--flags` inside splits into git options under PS 5.1.
+  $msg = Join-Path $env:TEMP 'ticket-loop-commit.txt'
+  [IO.File]::WriteAllText($msg, "chore: $line ($($t.Id))", [Text.UTF8Encoding]::new($false))
+  GitOk add $t.File; GitOk commit -q -F $msg | Out-Null
   GitOk push -q
 }
 
@@ -143,14 +156,17 @@ while ($t = NextTicket) {
   $started = Get-Date; $touched += $t.Id
   if ($t.Stage -eq 'to-implement') {
     $attempt = 1 + ((Get-Content $t.File -Raw -Encoding UTF8) | Select-String -AllMatches 'Attempt \d+ failed').Matches.Count
+    # A reopened ticket's branch holds the previous pass (tests + code): only a
+    # branch this attempt created is safe to drop.
+    $hadBranch = [bool](git branch --list $t.Branch)
     $res = RunStage $t $Model2 $ImplementMinutes 'implement'
     if ($DryRun) { break }
     $t = Ticket (Join-Path $Repo $t.File)
     if ($t.Stage -ne 'to-review') {
-      $tail = (Get-Content $script:LastLog -Tail 30) -join ' / '
-      Reset-Tree $t -DropBranch
-      if ($attempt -ge 2) { Note $t "Attempt $attempt failed: $res; blocked after two attempts" 'blocked'; LogLine $t 'blocked' $started }
-      else { Note $t "Attempt $attempt failed: $res. Gate/log tail: $tail"; LogLine $t 'implement failed, will retry' $started }
+      $tail = LogTail $script:LastLog
+      Reset-Tree $t -DropBranch:(-not $hadBranch)
+      if ($attempt -ge 2) { Note $t "Attempt $attempt failed: $res; blocked after two attempts. Log tail: $tail" 'blocked'; LogLine $t 'blocked' $started }
+      else { Note $t "Attempt $attempt failed: $res. Log tail: $tail"; LogLine $t 'implement failed, will retry' $started }
       continue
     }
   }
