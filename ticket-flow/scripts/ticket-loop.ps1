@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   Unattended ticket-flow driver. Feeds bare ticket ids to `claude -p`, one at a
   time, implement then review, and reads `Stage:` back. Adds no instructions of
@@ -73,7 +73,11 @@ function Ticket($file) {
   $rel = (Resolve-Path -Relative $file) -replace '^\.[\\/]', '' -replace '\\', '/'
   $text = Get-Content $file -Raw -Encoding UTF8
   $id = [regex]::Match(($text -split "`n")[0], '\p{Lu}[\p{Lu}0-9]*-\d+').Value
-  $branch = $id.ToLower()
+  # Stage 2 names the branch `<prefix>/<ID>-<slug>` (AGENTS.md); the slug is the
+  # agent's, so find it instead of guessing. Measured 2026-09-14: guessing `phy-20`
+  # never matched `phy/PHY-20-...`, so every unmerged ticket read its stage off main.
+  $branch = if ($id) { @(git for-each-ref --format='%(refname:short)' "refs/heads/*/$id-*" "refs/heads/$id-*" "refs/heads/$id")[0] }
+  if (-not $branch) { $branch = $id.ToLower() }
   # Stage lives on the ticket's branch until merge: read it there if unmerged.
   # ...except `blocked` on the base branch, which is the driver parking it: that wins.
   if ($id -and (Field $text 'Stage') -ne 'blocked' -and (git branch --list $branch) -and -not (git branch --merged $Base --list $branch)) {
@@ -108,8 +112,9 @@ function RunStage($t, $model, $minutes, $label) {
   }
   # A session that dies before doing anything (auth, bad flags) is our problem,
   # not the ticket's: stop the run instead of blaming the ticket and retrying.
+  # Measured 2026-09-14: a dropped internet connection prints only `Execution error`.
   if ($p.ExitCode -ne 0 -and (Get-Item $log).Length -lt 300) {
-    throw "claude failed to start:`n$(Get-Content $log -Raw)`n$(Get-Content "$log.err" -Raw)"
+    Add-Content $log "`nAPI Error: claude exited $($p.ExitCode) before doing anything`n$(Get-Content "$log.err" -Raw)"
   }
   $code = $p.ExitCode; $p.Dispose()
   return 'exit ' + $(if ($null -eq $code) { '?' } else { $code })
@@ -149,7 +154,8 @@ function Note($t, $line, $stage) {
   [IO.File]::WriteAllText((Join-Path $Repo $t.File), $text, [Text.UTF8Encoding]::new($false))
   # -F, not -m: a log tail with quotes or `--flags` inside splits into git options under PS 5.1.
   $msg = Join-Path $env:TEMP 'ticket-loop-commit.txt'
-  [IO.File]::WriteAllText($msg, "chore: $line ($($t.Id))", [Text.UTF8Encoding]::new($false))
+  $subject, $body = $line -split ' Log tail: ', 2
+  [IO.File]::WriteAllText($msg, "chore: $subject ($($t.Id))$(if ($body) { "`n`nLog tail: $body" })", [Text.UTF8Encoding]::new($false))
   GitOk add $t.File; GitOk commit -q -F $msg | Out-Null
   GitOk push -q
 }
