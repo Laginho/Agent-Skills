@@ -6,7 +6,8 @@ description: "Project-state brief at the start of a work session: what was done 
 # Standup
 
 Answer the three standup questions for the current repo: what got done, what is in
-progress or open, what comes next. Read-only. Output in chat, not a file.
+progress or open, what comes next. Read-only apart from `git pull --ff-only`. Output
+in chat, not a file.
 
 ## Where the facts come from
 
@@ -47,7 +48,10 @@ progress or open, what comes next. Read-only. Output in chat, not a file.
      `debt`, `accepted`) or whose tickets carry no `Priority:` line holds deliberate
      deferrals. Count them on one line in **Aberto** as accepted debt; never list them
      in **Desbloqueado** and never recommend them.
-4. **Git.** `git log --oneline -15` and `git log --oneline -10 -- .scratch/` to find
+4. **Git.** Always refresh the local branch first: `git pull --ff-only`. If it fails
+   (no upstream, diverged branch, dirty tree), say so in one line and read the state
+   as-is; never force, merge or stash to make it succeed.
+   Then `git log --oneline -15` and `git log --oneline -10 -- .scratch/` to find
    which features moved most recently and what closed. `git status --short` for a
    dirty tree. Ignore whole-tree CRLF noise (`--ignore-cr-at-eol` gives zero diff).
 5. **Active feature** = the `.scratch/` dir with the most recent commits, not
