@@ -122,6 +122,18 @@ function LogTail($log, $chars = 1200) {
   ($text -replace '\r?\n', ' / ').Trim()
 }
 
+# Why a stage stopped short. An API outage is ours, not the ticket's, so it must not
+# spend an attempt. A session that ended on a question gains nothing from a retry
+# that will only ask again: park it for a human now. Everything else is a failure.
+function Verdict($log) {
+  $text = [IO.File]::ReadAllText($log).TrimEnd()
+  if ($text -match '(?m)^API Error') { return 'api-error' }
+  if ($text -match '\?\W*$') { return 'asked' }
+  'failed'
+}
+# Two outages in a row is the network, not luck: stop instead of looping on it.
+function NetFail($tail) { if (++$script:NetFails -ge 2) { throw "API unreachable twice; stopping. Last: $tail" } }
+
 # Back to a clean base branch; drop the ticket's branch if asked.
 function Reset-Tree($t, [switch]$DropBranch) {
   git checkout -q -f $Base; git reset -q --hard; git clean -qfd
@@ -205,6 +217,14 @@ if ($SelfCheck) {
   if ((Median @(12, 45, 20)) -ne 20) { throw 'Median: odd count' }
   if ((Median @(5, 8)) -ne 8) { throw 'Median: even count' }
   if ((Median @(7)) -ne 7) { throw 'Median: single' }
+  # Verdict decides whether an attempt is spent; the shapes are the two real logs of 2026-09-14.
+  $tmp = Join-Path $env:TEMP 'ticket-loop-verdict.txt'
+  foreach ($case in @(@("API Error: Unable to connect to API (ENOTFOUND)`n", 'api-error'),
+                      @("Three options.`n`nWhich one do you want?`n", 'asked'),
+                      @("Done for stage 2, gate green.`n", 'failed'))) {
+    [IO.File]::WriteAllText($tmp, $case[0]); $got = Verdict $tmp
+    if ($got -ne $case[1]) { throw "Verdict: expected $($case[1]), got $got" }
+  }
   Write-Host 'Self-check OK'; exit 0
 }
 
@@ -234,8 +254,10 @@ while ($t = NextTicket) {
     if ($DryRun) { break }
     $t = Ticket (Join-Path $Repo $t.File)
     if ($t.Stage -ne 'to-review') {
-      $tail = LogTail $script:LastLog
+      $tail = LogTail $script:LastLog; $why = Verdict $script:LastLog
       Reset-Tree $t -DropBranch:(-not $hadBranch)
+      if ($why -eq 'api-error') { NetFail $tail; LogStage $t 'implement' $Model2 $attempt 'api error, not counted' $started; continue }
+      if ($why -eq 'asked') { Note $t "Attempt $attempt stopped to ask: $tail" 'blocked'; LogStage $t 'implement' $Model2 $attempt 'asked, blocked' $started; continue }
       if ($attempt -ge 2) { Note $t "Attempt $attempt failed: $res; blocked after two attempts. Log tail: $tail" 'blocked'; LogStage $t 'implement' $Model2 $attempt "failed ($res), blocked" $started }
       else { Note $t "Attempt $attempt failed: $res. Log tail: $tail"; LogStage $t 'implement' $Model2 $attempt "failed ($res), will retry" $started }
       continue
@@ -249,6 +271,9 @@ while ($t = NextTicket) {
   GitOk pull -q --ff-only
   $t = Ticket (Join-Path $Repo $t.File)
   $names = @{ 'done' = 'merged'; 'to-merge' = 'waiting for you'; 'to-implement' = 'reopened' }
+  if (-not $names[$t.Stage] -and (Verdict $script:LastLog) -eq 'api-error') {
+    NetFail (LogTail $script:LastLog); LogStage $t 'review' $Model3 $attempt 'api error, not counted' $started; continue
+  }
   $outcome = if ($names[$t.Stage]) { $names[$t.Stage] } else { "review ended at $($t.Stage) ($res)" }
   LogStage $t 'review' $Model3 $attempt $outcome $started
   # A review that stopped short of a verdict (`to-review`, `reviewing`) would be
