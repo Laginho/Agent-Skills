@@ -68,14 +68,14 @@ function Field($text, $name) { [regex]::Match($text, "(?m)^$name`:\s*(.+?)\s*$")
 function Ticket($file) {
   $rel = (Resolve-Path -Relative $file) -replace '^\.[\\/]', '' -replace '\\', '/'
   $text = Get-Content $file -Raw -Encoding UTF8
-  $id = [regex]::Match(($text -split "`n")[0], '[A-ZÉ][A-Z0-9É]*-\d+').Value
+  $id = [regex]::Match(($text -split "`n")[0], '\p{Lu}[\p{Lu}0-9]*-\d+').Value
   $branch = $id.ToLower()
   # Stage lives on the ticket's branch until merge: read it there if unmerged.
   # ...except `blocked` on the base branch, which is the driver parking it: that wins.
   if ($id -and (Field $text 'Stage') -ne 'blocked' -and (git branch --list $branch) -and -not (git branch --merged $Base --list $branch)) {
     $text = (git show "${branch}:$rel" 2>$null) -join "`n"
   }
-  $blocked = (Field $text 'Blocked by') -split '[,\s]+' | Where-Object { $_ -match '^[A-ZÉ][A-Z0-9É]*-\d+$' }
+  $blocked = (Field $text 'Blocked by') -split '[,\s]+' | Where-Object { $_ -match '^\p{Lu}[\p{Lu}0-9]*-\d+$' }
   $last = ([regex]::Matches($text, '(?m)^- .+$') | Select-Object -Last 1).Value
   [pscustomobject]@{ Id = $id; File = $rel; Branch = $branch; Stage = (Field $text 'Stage'); BlockedBy = $blocked; LastComment = $last }
 }
