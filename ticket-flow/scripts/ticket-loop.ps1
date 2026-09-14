@@ -60,8 +60,11 @@ function Preflight {
   if ($cur -ne $Base) { throw "On '$cur', expected '$Base'." }
   GitOk fetch --quiet
   if ((GitOk rev-parse HEAD) -ne (GitOk rev-parse '@{u}')) { throw "Local $Base differs from remote." }
-  $inflight = Get-ChildItem "$Tracker/*/issues/*.md" | Where-Object { Select-String -Path $_ -Pattern '^Stage: (implementing|reviewing)' -Quiet }
-  if ($inflight) { throw "Tickets mid-run: $($inflight.Name -join ', ')" }
+  # Stage 2 commits `implementing` on the ticket's branch, so the worktree copy still
+  # reads `to-implement`. Read stages the way the loop does, or a run killed mid-stage
+  # leaves a ticket no stage matches: skipped forever instead of stopping the next run.
+  $inflight = @(AllTickets | Where-Object { $_.Stage -in 'implementing', 'reviewing' })
+  if ($inflight) { throw "Tickets mid-run: $($inflight.Id -join ', ')" }
 }
 
 # --- tickets --------------------------------------------------------------------
