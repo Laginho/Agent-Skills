@@ -20,6 +20,18 @@ progress or open, what comes next. Read-only. Output in chat, not a file.
      Closed = `complete`, `resolved`, `wontfix`. Everything else is open
      (`open`, `claimed`, `blocked`, `ready-for-agent`, `ready-for-human`, `needs-*`).
    - `Priority:` and `Blocked by:` lines, when present, order the "next" list.
+   - **`Stage:` wins over `Status:` when both exist.** A repo driven by the ticket-flow
+     loop carries both: `Status:` is binary (open/resolved), `Stage:` is where in the
+     loop the ticket actually is (`to-implement` | `implementing` | `to-review` |
+     `reviewing` | `to-merge` | `done` | `blocked`). Closed = `done`. Report the
+     `Stage` value, never the flattened `open`.
+   - **`Stage:` lives on the ticket's branch until merge.** Reading the working tree
+     gives you whatever branch is checked out, and a ticket mid-flow has its real
+     stage on its own branch (the id lowercased). For each open ticket: if that branch
+     exists and `git branch --merged <base> --list <branch>` is empty, read the ticket
+     with `git show <branch>:<path>` instead. Exception: `blocked` on the base branch
+     wins — that is the driver parking the ticket. A branch that is already merged is
+     stale; name those in one line so they can be deleted.
    - `ledger.md` is a recent-activity log. Column layout varies by repo and it may be
      a bare table (`date | ID | commit`) with no prose. Read the last rows for IDs and
      dates; cross-reference the IDs against `git log` to learn what each one was.
@@ -61,9 +73,21 @@ sweeps or other housekeeping commits.
 open ticket files you saw; name the top 3 by priority/dependency order. If a
 phase/feature is fully closed, say so in one line and move on.
 
-**Desbloqueado** — every unblocked ticket from step 3, one per line: `ID (priority) —
-title`. This block is mandatory and is the reader's actual work queue. A ticket whose
-only blockers are closed belongs here.
+**Desbloqueado** — the open tickets as a tree, indented under what blocks them, so the
+reader gets the queue *and* why the rest waits. Roots are the tickets whose blockers are
+all closed — that is the work queue. Under a `blocked` or `to-merge` node, add the last
+`## Comments` line: it is the question waiting on a human. On a repeat (a ticket with
+several blockers) print `ID ...` rather than re-expanding it.
+
+```
+DEP-006       to-review
+  DEP-001     blocked
+  > axios 1.20 declara ...
+    QA-001    to-implement
+CLEAN-003     to-implement
+```
+
+This block is mandatory. Accepted debt stays out of it (step 3).
 
 **Próximo passo** — one recommendation: the first open, unblocked ticket in dependency
 order, with its path. If nothing is open: say the tracker is empty and offer three

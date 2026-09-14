@@ -240,8 +240,9 @@ does, it does because this file says so. Nobody is watching, so:
   it does not review its own work. Stage 3 stops at `done`, `to-merge`,
   `to-implement` or `blocked`, nothing else.
 
-Answering is a stage-1 job, done once per batch: read the "Decisions needed"
-list, fold each answer into the ticket body (Primary files, a criterion, a
+Answering is a stage-1 job, done once per batch: read the tree the driver prints
+when it stops — every `blocked` and `to-merge` node carries the question under it —
+then fold each answer into the ticket body (Primary files, a criterion, a
 filled blank), set `to-implement`, commit on the base branch, run the driver
 again. A `to-merge` PR is answered on GitHub: merge it, or comment and reopen.
 
@@ -250,9 +251,16 @@ Two conventions the driver relies on:
 - A failed stage-2 run leaves `Attempt N failed: <reason>` under `## Comments`,
   committed on the branch. A session that finds one is a retry: read it first.
   After the second, the driver sets `blocked`.
-- It appends one line per ticket to `<tracker>/run-log.md`. That log is what
-  happened while nobody watched; `/standup` reads the tracker for where things
-  stand now.
+- It appends one row per **stage run** to `<tracker>/run-log.md`: when, id, stage,
+  model, attempt, outcome, PR, minutes. One row per ticket would collapse stage 2 and
+  stage 3 into a single duration and drop the model, and those are the two axes worth
+  correlating later ("tickets shaped like X cost sonnet three attempts"). Nothing about
+  the ticket itself is copied into the log — the ticket file is in git, so any property
+  worth correlating is re-derivable. The driver prints an aggregate line when it stops;
+  that line is the trigger to investigate, not the investigation.
+- It prints the open tickets as a tree before and after every run, including runs it
+  refuses and runs that crash. `/standup` renders the same tree for where things stand
+  now; the log is what happened while nobody watched.
 
 ## A repo with no bindings block
 

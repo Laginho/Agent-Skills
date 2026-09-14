@@ -13,7 +13,8 @@ param(
   [string]$Tracker = '.scratch',
   [int]$ImplementMinutes = 45,
   [int]$ReviewMinutes = 20,
-  [switch]$DryRun
+  [switch]$DryRun,
+  [switch]$SelfCheck
 )
 $ErrorActionPreference = 'Stop'
 Set-Location $Repo
@@ -138,38 +139,107 @@ function Note($t, $line, $stage) {
   GitOk push -q
 }
 
-function LogLine($t, $outcome, $started) {
-  $pr = (gh pr list --head $t.Branch --state all --json url --jq '.[0].url' 2>$null)
+# One row per stage, not per ticket: the model and the time it burned are the two
+# axes worth correlating later, and a per-ticket row cannot hold either.
+function LogStage($t, $stage, $model, $attempt, $outcome, $started) {
+  # The PR exists only once a review opened one; skip the network call otherwise.
+  $pr = if ($stage -eq 'review') { gh pr list --head $t.Branch --state all --json url --jq '.[0].url' 2>$null }
   $mins = [int]((Get-Date) - $started).TotalMinutes
-  Add-Content -Encoding UTF8 $RunLog ("| {0} | {1} | {2} | {3} | {4}m |" -f (Get-Date -Format 'yyyy-MM-dd HH:mm'), $t.Id, $outcome, $pr, $mins)
-  Say "$($t.Id): $outcome"
+  Add-Content -Encoding UTF8 $RunLog ('| {0} | {1} | {2} | {3} | {4} | {5} | {6} | {7}m |' -f `
+    (Get-Date -Format 'yyyy-MM-dd HH:mm'), $t.Id, $stage, $model, $attempt, $outcome, $pr, $mins)
+  Say "$($t.Id) $stage ($model): $outcome"
+}
+
+# --- what is left ------------------------------------------------------------------
+# An indented tree, not a 2D graph: a terminal reads nesting, and this needs to cost
+# nothing to look at. Only open tickets -- the done ones are in git if anyone asks.
+function Walk($t, $depth, $open, $seen) {
+  $pad = '  ' * ($depth + 1)
+  if ($seen.ContainsKey($t.Id)) { Write-Host ('{0}{1} ...' -f $pad, $t.Id); return }
+  $seen[$t.Id] = $true
+  Write-Host ('{0}{1,-14}{2}' -f $pad, $t.Id, $t.Stage)
+  # For anything parked on a human, the question itself. Printed, never stored: it
+  # already lives in the ticket's `## Comments`, which is in git.
+  if ($t.Stage -in 'blocked', 'to-merge') {
+    $c = ($t.LastComment -replace '^- ', '').Trim()
+    if ($c) { Write-Host ('{0}> {1}' -f $pad, $(if ($c.Length -gt 110) { $c.Substring(0, 110) + '...' } else { $c })) }
+  }
+  $open | Where-Object { $_.BlockedBy -contains $t.Id } | ForEach-Object { Walk $_ ($depth + 1) $open $seen }
+}
+function ShowTree($label) {
+  $all = AllTickets
+  $open = @($all | Where-Object Stage -ne 'done')
+  if (-not $open) { Write-Host "`n${label}: nothing left."; return }
+  $doneIds = $all | Where-Object Stage -eq 'done' | ForEach-Object Id
+  $seen = @{}
+  Write-Host ("`n{0} -- {1} open, indented under what blocks them:" -f $label, $open.Count)
+  $open | Where-Object { -not ($_.BlockedBy | Where-Object { $_ -notin $doneIds }) } | ForEach-Object { Walk $_ 0 $open $seen }
+  # A cycle, or a blocker that is itself unreachable, would otherwise print nothing.
+  $open | Where-Object { -not $seen.ContainsKey($_.Id) } | ForEach-Object { Walk $_ 0 $open $seen }
+}
+
+function Median($v) { $s = @($v | Sort-Object); $s[[int][math]::Floor($s.Count / 2)] }
+
+# Not the analysis -- the trigger for it. Correlating ticket shape against model and
+# duration needs something that reads prose; this just says when it is worth asking.
+function ShowSummary {
+  if (-not (Test-Path $RunLog)) { return }
+  $rows = @(foreach ($l in (Get-Content $RunLog -Encoding UTF8)) {
+    $c = @($l -split '\|' | ForEach-Object { $_.Trim() })
+    if ($c.Count -eq 10 -and $c[1] -match '^\d{4}-\d\d-\d\d') { , $c }
+  })
+  if (-not $rows) { return }
+  $med = { param($stage)
+    $v = @($rows | Where-Object { $_[3] -eq $stage } | ForEach-Object { [int]($_[8] -replace '\D', '') })
+    if ($v.Count) { '{0}m' -f (Median $v) } else { 'n/a' } }
+  $n = { param($pat) @($rows | Where-Object { $_[6] -match $pat }).Count }
+  Write-Host ("`n{0} stages | {1} merged | {2} reopened | {3} retries | implement {4} ({5}) | review {6} ({7})" -f `
+    $rows.Count, (& $n '^merged$'), (& $n '^reopened$'), (& $n '^failed'), (& $med 'implement'), $Model2, (& $med 'review'), $Model3)
+}
+
+if ($SelfCheck) {
+  # Median is the only arithmetic here and it was wrong once: [int](3/2) is 2 in PS.
+  if ((Median @(12, 45, 20)) -ne 20) { throw 'Median: odd count' }
+  if ((Median @(5, 8)) -ne 8) { throw 'Median: even count' }
+  if ((Median @(7)) -ne 7) { throw 'Median: single' }
+  Write-Host 'Self-check OK'; exit 0
 }
 
 # --- main loop --------------------------------------------------------------------
+# Before Preflight on purpose: a run it refuses should still tell you where you are.
+ShowTree 'Before this run'
 if (-not $DryRun) { Preflight }
-if (-not (Test-Path $RunLog)) { Set-Content -Encoding UTF8 $RunLog "| When | ID | Outcome | PR | Took |`n|---|---|---|---|---|" }
+$hdr = '| When | ID | Stage | Model | Attempt | Outcome | PR | Took |'
+$sep = '|---|---|---|---|---|---|---|---|'
+if (-not (Test-Path $RunLog)) { Set-Content -Encoding UTF8 $RunLog "$hdr`n$sep" }
+elseif (-not (Select-String -Path $RunLog -SimpleMatch $hdr -Quiet)) {
+  # Old rows were one per ticket and carried no model. Backfilling the split would
+  # invent durations that were never measured: leave them, start a second table.
+  Add-Content -Encoding UTF8 $RunLog "`n### Schema change: one row per stage, with the model`n`n$hdr`n$sep"
+}
 Say "Gate '$Gate', base '$Base', stage 2 $Model2, stage 3 $Model3"
 
-$touched = @()
 try {
 while ($t = NextTicket) {
-  $started = Get-Date; $touched += $t.Id
+  $attempt = 1 + ((Get-Content $t.File -Raw -Encoding UTF8) | Select-String -AllMatches 'Attempt \d+ failed').Matches.Count
   if ($t.Stage -eq 'to-implement') {
-    $attempt = 1 + ((Get-Content $t.File -Raw -Encoding UTF8) | Select-String -AllMatches 'Attempt \d+ failed').Matches.Count
     # A reopened ticket's branch holds the previous pass (tests + code): only a
     # branch this attempt created is safe to drop.
     $hadBranch = [bool](git branch --list $t.Branch)
+    $started = Get-Date
     $res = RunStage $t $Model2 $ImplementMinutes 'implement'
     if ($DryRun) { break }
     $t = Ticket (Join-Path $Repo $t.File)
     if ($t.Stage -ne 'to-review') {
       $tail = LogTail $script:LastLog
       Reset-Tree $t -DropBranch:(-not $hadBranch)
-      if ($attempt -ge 2) { Note $t "Attempt $attempt failed: $res; blocked after two attempts. Log tail: $tail" 'blocked'; LogLine $t 'blocked' $started }
-      else { Note $t "Attempt $attempt failed: $res. Log tail: $tail"; LogLine $t 'implement failed, will retry' $started }
+      if ($attempt -ge 2) { Note $t "Attempt $attempt failed: $res; blocked after two attempts. Log tail: $tail" 'blocked'; LogStage $t 'implement' $Model2 $attempt "failed ($res), blocked" $started }
+      else { Note $t "Attempt $attempt failed: $res. Log tail: $tail"; LogStage $t 'implement' $Model2 $attempt "failed ($res), will retry" $started }
       continue
     }
+    LogStage $t 'implement' $Model2 $attempt 'to-review' $started
   }
+  $started = Get-Date
   $res = RunStage $t $Model3 $ReviewMinutes 'review'
   if ($DryRun) { break }
   Reset-Tree $t
@@ -177,17 +247,16 @@ while ($t = NextTicket) {
   $t = Ticket (Join-Path $Repo $t.File)
   $names = @{ 'done' = 'merged'; 'to-merge' = 'waiting for you'; 'to-implement' = 'reopened' }
   $outcome = if ($names[$t.Stage]) { $names[$t.Stage] } else { "review ended at $($t.Stage) ($res)" }
-  LogLine $t $outcome $started
+  LogStage $t 'review' $Model3 $attempt $outcome $started
   # A review that stopped short of a verdict (`to-review`, `reviewing`) would be
   # picked again forever or never again: park it for a human.
   if (-not $names[$t.Stage]) { Note $t "Review ended at $($t.Stage) ($res); branch $($t.Branch) holds the review; left for a human" 'blocked' }
 }
 Say 'Nothing runnable. Done.'
-# Everything waiting on a human, with the last comment: the questions to answer.
-$ask = AllTickets | Where-Object { $_.Id -in $touched -and $_.Stage -in 'blocked', 'to-merge' }
-if ($ask) {
-  $lines = $ask | ForEach-Object { "- **$($_.Id)** ($($_.Stage)): $($_.LastComment -replace '^- ', '')" }
-  Add-Content -Encoding UTF8 $RunLog ("`n### Decisions needed ({0})`n{1}`n" -f (Get-Date -Format 'yyyy-MM-dd HH:mm'), ($lines -join "`n"))
-  Write-Host "`nDecisions needed:"; $lines | Write-Host
+} finally {
+  # A run that crashed is when you most want the state, so this lives in finally --
+  # after Reset-Tree, or the tree would read tickets off whatever branch it died on.
+  if (-not $DryRun) { Reset-Tree $null }
+  ShowTree 'After this run'
+  ShowSummary
 }
-} finally { if (-not $DryRun) { Reset-Tree $null } }
