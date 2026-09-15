@@ -1,6 +1,6 @@
 ---
 name: ticket-flow
-description: The one-ticket-at-a-time build loop — stage 1 specifies, stage 2 implements test-first, stage 3 reviews and merges. Use when a session receives a bare ticket ID, or when asked to run a stage of the ticket flow.
+description: The one-ticket-at-a-time build loop — stage 1 specifies, stage 2 implements test-first, stage 3 reviews and merges. Use when a session receives a bare ticket ID, or when asked to run a stage of the ticket flow. The unattended driver is the `sweatshop` skill.
 ---
 
 # Ticket flow
@@ -66,7 +66,7 @@ dispatches on; a stage that moved in a dirty working tree is a stage that can li
 | → `to-review` | stage 2 | its last code commit, gate green |
 | → `reviewing` | stage 3 | only if it commits a fix of its own |
 | → `done` | stage 3 | the same commit as the ledger line |
-| → `to-merge` | stage 3 | the commit the PR is opened from |
+| → `to-merge` | stage 3 | the commit the PR is opened from (no-session flow only) |
 | → `to-implement` | stage 3 | the reopen commit |
 | → `blocked` | anyone | with the reason under `## Comments` |
 
@@ -129,7 +129,8 @@ Five additions, and each earns its place:
 - **`Review:`.** Who clicks merge. `agent` (the default when the line is missing)
   lets stage 3 merge an approved PR itself; `human` holds the PR for the person.
   Stage 1 sets it when writing the ticket — the author decides what they want to
-  see, not the reviewer.
+  see, not the reviewer. Inside a session branch (below) nothing is held: `human`
+  only puts the ticket at the top of the session PR.
 
 Also per effort directory: `ledger.md`, a `| Data | ID | Commit |` table of closed
 tickets, one line each, written when a ticket reaches `done`.
@@ -139,12 +140,19 @@ tickets, one line each, written when a ticket reaches `done`.
 A session handed nothing but an id (`OBS-004`) finds the ticket — the tracker file
 says how, usually `grep -rl '<ID>' <tracker path>` — and dispatches on `Stage`.
 
-**Find the branch before reading `Stage`.** The stage is committed on the
-ticket's branch (stage 2 names it after the id, lowercased: `obs-004`). The copy
-on the base branch is stale until merge, so a fresh session on `master` reads
+**Find the loop's base first.** It is the bindings' base branch — unless a
+`sweatshop/*` branch exists that is not merged into it (`git branch --list
+'sweatshop/*' --no-merged <base>`, remote too). Then *that* is the base for
+stages 2 and 3: branch from it, rebase onto it, merge into it. It is the
+`sweatshop` driver's session branch, collecting every ticket of a run into one
+PR for the human. With no such branch, nothing below changes.
+
+**Find the ticket's branch before reading `Stage`.** The stage is committed on
+the ticket's branch (stage 2 names it after the id, lowercased: `obs-004`). The
+copy on the base is stale until merge, so a fresh session on `master` reads
 `to-implement` on a ticket that is actually waiting for review. Run
 `git branch --list '<id lowercased>'` first; if the branch exists and is not
-merged into the base branch, check it out and read the ticket there. Only then
+merged into the loop's base, check it out and read the ticket there. Only then
 dispatch:
 
 | Stage | What you do |
@@ -153,7 +161,7 @@ dispatch:
 | `implementing` | A session stopped mid-run. Report what the branch holds and stop — do not continue blind. |
 | `to-review` | Stage 3. Call the `code-review` skill. |
 | `reviewing` | Same as `implementing`: report and stop. |
-| `to-merge` | The PR waits on the human. Report it and stop. |
+| `to-merge` | The PR waits on the human (no-session flow only). Report it and stop. |
 | `done` | Nothing to do. Say so and stop. |
 | `blocked` | Report the reason from `## Comments` and stop. |
 
@@ -209,58 +217,59 @@ Stage 3 closes by appending a `#### Resolution (YYYY-MM-DD)` block to the ticket
 decision, files, red-green proof, gate output — and adding the ledger line, in the
 same commit as `Stage: done`. **The ticket is the memory between sessions.**
 
-Merge, always through a PR so the trail is readable afterwards:
+The review's **verdict** is one line, and it is the first line of the Resolution
+block: `Verdict: Approve`, or `Verdict: Needs your call: <one sentence why>`.
+The findings follow. "Needs your call" is for anything the reviewer is not
+confident about, including a small fix it made itself that it would rather have
+a human glance at. A wrong "Approve" costs more than a held ticket.
+
+Merge depends on the loop's base:
+
+**Into a session branch** (a `sweatshop/*` is open):
+
+1. Rebase the ticket branch onto the session, gate green.
+2. A conflict inside the ticket's Primary files: resolve it. Outside them:
+   `Stage: blocked` with the conflict under `## Comments`, commit, stop.
+3. `git checkout <session>; git merge --no-ff <ticket branch>`, then the
+   Resolution block, the ledger line and `Stage: done` in one commit on the
+   session. No PR, no push: the driver pushes and opens the session PR when the
+   run stops, every verdict in its body. `Review:` holds nothing here.
+
+**Into the bindings' base** (no session), always through a PR:
 
 1. Rebase the branch onto the base branch, gate green, push, `gh pr create`.
-2. Post the review as one PR comment. **Its first line is the verdict**:
-   `Approve`, or `Needs your call: <one sentence why>`. The findings follow.
+2. Post the review as one PR comment, verdict first.
 3. `Review: agent` and the verdict is `Approve`: wait for CI
    (`gh pr checks --watch`), then `gh pr merge --merge --delete-branch`, pull the
    base branch, set `done` there with the ledger line. Never squash.
 4. `Review: human`, or the verdict is `Needs your call`: set `to-merge`, leave
    the PR open, stop.
 
-"Needs your call" is for anything the reviewer is not confident about, including
-a small fix it made itself that it would rather have a human glance at. A wrong
-"Approve" costs more than a held PR.
-
 ## Unattended runs
 
-`scripts/ticket-loop.ps1 <repo>` feeds bare ids to `claude -p`, one at a time,
-and reads `Stage:` back. It adds no instructions of its own: everything a session
-does, it does because this file says so. Nobody is watching, so:
+The `sweatshop` skill's driver feeds bare ids to `claude -p`, one at a time, and
+reads `Stage:` back. It adds no instructions of its own: everything a session
+does, it does because this file says so. Nobody is watching, so a session owes it
+three things:
 
 - **A question is a `blocked`.** There is no one to answer "which do you want?".
   Stage 2 that needs a decision (a seam the ticket does not name, a blank the
   spec left) touches nothing, sets `Stage: blocked` with the question under
-  `## Comments`, commits, and stops; the driver moves on to the next ticket and
-  lists every open question at the end of the run. Stage 3 that is unsure posts `Needs your call` and sets `to-merge`; it
-  never ends at `reviewing` asking whether to open the PR.
+  `## Comments`, commits, and stops. Stage 3 that is unsure writes `Needs your
+  call` and finishes; it never ends at `reviewing` asking what to do.
 - **One stage per session.** Stage 2 stops the moment `to-review` is committed;
   it does not review its own work. Stage 3 stops at `done`, `to-merge`,
   `to-implement` or `blocked`, nothing else.
+- **A failed attempt leaves a trace.** The driver writes `Attempt N failed:
+  <reason>` under `## Comments`, committed on the branch. A session that finds
+  one is a retry: read it first.
 
 Answering is a stage-1 job, done once per batch: read the tree the driver prints
-when it stops — every `blocked` and `to-merge` node carries the question under it —
-then fold each answer into the ticket body (Primary files, a criterion, a
-filled blank), set `to-implement`, commit on the base branch, run the driver
-again. A `to-merge` PR is answered on GitHub: merge it, or comment and reopen.
-
-Two conventions the driver relies on:
-
-- A failed stage-2 run leaves `Attempt N failed: <reason>` under `## Comments`,
-  committed on the branch. A session that finds one is a retry: read it first.
-  After the second, the driver sets `blocked`.
-- It appends one row per **stage run** to `<tracker>/run-log.md`: when, id, stage,
-  model, attempt, outcome, PR, minutes. One row per ticket would collapse stage 2 and
-  stage 3 into a single duration and drop the model, and those are the two axes worth
-  correlating later ("tickets shaped like X cost sonnet three attempts"). Nothing about
-  the ticket itself is copied into the log — the ticket file is in git, so any property
-  worth correlating is re-derivable. The driver prints an aggregate line when it stops;
-  that line is the trigger to investigate, not the investigation.
-- It prints the open tickets as a tree before and after every run, including runs it
-  refuses and runs that crash. `/standup` renders the same tree for where things stand
-  now; the log is what happened while nobody watched.
+when it stops — every `blocked` node carries the question under it — then fold
+each answer into the ticket body (Primary files, a criterion, a filled blank),
+set `to-implement`, commit on the loop's base, run the driver again. Everything
+else about the driver — the session branch, the run log, how to start it — is in
+`sweatshop/SKILL.md`.
 
 ## A repo with no bindings block
 
