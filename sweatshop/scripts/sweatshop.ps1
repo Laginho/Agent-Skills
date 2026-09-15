@@ -204,7 +204,11 @@ function NetFail($tail) { if (++$script:NetFails -ge 2) { throw "API unreachable
 
 # Back to a clean loop base (the session); drop the ticket's branch if asked.
 function Reset-Tree($t, [switch]$DropBranch) {
-  git checkout -q -f $Loop; git reset -q --hard; git clean -qfd
+  # Checked, not bare: a failed checkout leaves HEAD on the ticket branch, and the rest
+  # of the run then commits notes there and reads every stage off it. Measured
+  # 2026-09-15: that turned one bad $Loop into 70 minutes of wrong work.
+  GitOk checkout -q -f $Loop | Out-Null
+  git reset -q --hard; git clean -qfd
   if ($DropBranch -and (git branch --list $t.Branch)) { git branch -q -D $t.Branch }
 }
 
@@ -344,7 +348,7 @@ if ($SelfCheck) {
 # The tree reads off the session, so it comes after Use-Session -- but a run
 # Preflight refuses should still tell you where you are.
 try { if (-not $DryRun) { Preflight } } catch { ShowTree 'Before this run (refused)'; throw }
-$session = Use-Session
+$session = @(Use-Session)[-1]   # [-1]: the branch is emitted last, so git chatter cannot ride out
 Say "session: $session$(if ($DryRun) { ' (dry run: not checked out, tree read off the base)' })"
 if (-not $DryRun) { $Loop = $session }
 ShowTree 'Before this run'
