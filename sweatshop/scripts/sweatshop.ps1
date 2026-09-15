@@ -22,12 +22,15 @@ Set-Location $Repo
 $Repo = (Get-Location).Path
 
 # PS 5.1 turns any stderr line (even a git warning) into a terminating error under
-# 2>&1 with ErrorActionPreference=Stop, so judge git by its exit code only.
+# 2>&1 with ErrorActionPreference=Stop, so judge git by its exit code only. Merged
+# stderr comes back as ErrorRecord: keep it for the throw, never in the return value.
+# Measured 2026-09-15: push's "remote: Create a pull request" banner rode out of
+# Use-Session, $Loop became an array, and every later `git ... $Loop` was a pathspec error.
 function GitOk {
   $ErrorActionPreference = 'Continue'
-  $out = & git @args 2>&1 | ForEach-Object { "$_" }
-  if ($LASTEXITCODE) { throw "git $args`n$($out -join "`n")" }
-  $out
+  $out = & git @args 2>&1
+  if ($LASTEXITCODE) { throw "git $args`n$(($out | ForEach-Object { "$_" }) -join "`n")" }
+  $out | Where-Object { $_ -isnot [Management.Automation.ErrorRecord] } | ForEach-Object { "$_" }
 }
 function Say($m) { Write-Host ("[{0}] {1}" -f (Get-Date -Format HH:mm:ss), $m) }
 
@@ -327,6 +330,13 @@ if ($SelfCheck) {
                    [pscustomobject]@{ Id = 'A-2'; Review = 'human'; Verdict = 'Approve' },
                    [pscustomobject]@{ Id = 'A-3'; Review = 'agent'; Verdict = 'Needs your call: x' })
   if ((($body -split "`n") -like '- *') -join ' ' -notmatch 'A-2 .* A-3 .* A-1') { throw "PrBody: order`n$body" }
+  # GitOk must return stdout only: `checkout -b` says "Switched to a new branch" on stderr.
+  $tmp = Join-Path $env:TEMP ('sweatshop-git-' + [guid]::NewGuid())
+  New-Item -ItemType Directory -Force $tmp | Out-Null
+  GitOk -C $tmp init -q | Out-Null
+  $leak = @(GitOk -C $tmp checkout -b probe)
+  Remove-Item -Recurse -Force $tmp
+  if ($leak.Count) { throw "GitOk: stderr leaked into output: $($leak -join ' / ')" }
   Write-Host 'Self-check OK'; exit 0
 }
 
