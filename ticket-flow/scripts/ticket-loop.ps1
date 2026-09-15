@@ -68,7 +68,10 @@ function Preflight {
 }
 
 # --- tickets --------------------------------------------------------------------
-function Field($text, $name) { [regex]::Match($text, "(?m)^$name`:\s*(.+?)\s*$").Groups[1].Value }
+# Headers come in both shapes: `Stage: x` (this loop's template) and `**Stage:** x`
+# (what the vendored tracker writes around it). Measured 2026-09-15: the plain-only
+# regex read every bold ticket as stageless -- open tickets closed, nothing runnable.
+function Field($text, $name) { [regex]::Match($text, "(?m)^\*{0,2}$name\*{0,2}`:\*{0,2}\s*(.+?)\s*$").Groups[1].Value }
 function Ticket($file) {
   $rel = (Resolve-Path -Relative $file) -replace '^\.[\\/]', '' -replace '\\', '/'
   $text = Get-Content $file -Raw -Encoding UTF8
@@ -85,7 +88,11 @@ function Ticket($file) {
   }
   $blocked = (Field $text 'Blocked by') -split '[,\s]+' | Where-Object { $_ -match '^\p{Lu}[\p{Lu}0-9]*-\d+$' }
   $last = ([regex]::Matches($text, '(?m)^- .+$') | Select-Object -Last 1).Value
-  [pscustomobject]@{ Id = $id; File = $rel; Branch = $branch; Stage = (Field $text 'Stage'); BlockedBy = $blocked; LastComment = $last }
+  # Tickets that predate this loop carry only the vendored `Status:`. A closed one is
+  # done; an open one has no stage to dispatch on, so it shows in the tree and never runs.
+  $stage = Field $text 'Stage'
+  if (-not $stage -and (Field $text 'Status') -in 'complete', 'resolved', 'wontfix') { $stage = 'done' }
+  [pscustomobject]@{ Id = $id; File = $rel; Branch = $branch; Stage = $stage; BlockedBy = $blocked; LastComment = $last }
 }
 function AllTickets { Get-ChildItem "$Tracker/*/issues/*.md" | Sort-Object FullName | ForEach-Object { Ticket $_.FullName } | Where-Object Id }
 function NextTicket {
@@ -150,7 +157,7 @@ function Note($t, $line, $stage) {
   $text = Get-Content $t.File -Raw -Encoding UTF8
   if ($text -notmatch '(?m)^## Comments') { $text = $text.TrimEnd() + "`n`n## Comments`n" }
   $text = $text.TrimEnd() + "`n`n- $(Get-Date -Format yyyy-MM-dd) $line`n"
-  if ($stage) { $text = $text -replace '(?m)^Stage: .+$', "Stage: $stage" }
+  if ($stage) { $text = $text -replace '(?m)^(\*{0,2}Stage\*{0,2}:\*{0,2})\s*.+$', "`$1 $stage" }
   [IO.File]::WriteAllText((Join-Path $Repo $t.File), $text, [Text.UTF8Encoding]::new($false))
   # -F, not -m: a log tail with quotes or `--flags` inside splits into git options under PS 5.1.
   $msg = Join-Path $env:TEMP 'ticket-loop-commit.txt'
@@ -223,6 +230,10 @@ if ($SelfCheck) {
   if ((Median @(12, 45, 20)) -ne 20) { throw 'Median: odd count' }
   if ((Median @(5, 8)) -ne 8) { throw 'Median: even count' }
   if ((Median @(7)) -ne 7) { throw 'Median: single' }
+  # Field reading only `Stage:` is why a whole tracker once read as stageless.
+  foreach ($shape in 'Stage: to-review', '**Stage:** to-review', '**Stage**: to-review') {
+    if ((Field "# T-1: x`n$shape`n" 'Stage') -ne 'to-review') { throw "Field: $shape" }
+  }
   # Verdict decides whether an attempt is spent; the shapes are the two real logs of 2026-09-14.
   $tmp = Join-Path $env:TEMP 'ticket-loop-verdict.txt'
   foreach ($case in @(@("API Error: Unable to connect to API (ENOTFOUND)`n", 'api-error'),
@@ -286,7 +297,7 @@ while ($t = NextTicket) {
   # picked again forever or never again: park it for a human.
   if (-not $names[$t.Stage]) { Note $t "Review ended at $($t.Stage) ($res); branch $($t.Branch) holds the review; left for a human" 'blocked' }
 }
-Say 'Nothing runnable. Done.'
+if (-not $DryRun) { Say 'Nothing runnable. Done.' }
 } finally {
   # A run that crashed is when you most want the state, so this lives in finally --
   # after Reset-Tree, or the tree would read tickets off whatever branch it died on.
