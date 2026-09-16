@@ -1,6 +1,6 @@
 # Agent Skills
 
-Four skills for coding agents. Provider-agnostic: a skill is a folder with a
+Five skills for coding agents. Provider-agnostic: a skill is a folder with a
 `SKILL.md` inside, which is all any tool needs.
 
 | Skill | What it does |
@@ -8,9 +8,10 @@ Four skills for coding agents. Provider-agnostic: a skill is a folder with a
 | [`audit`](audit/SKILL.md) | Whole-repo code audit ending in a verdict — Approved / Approved with cleanup / Not approved — and a written report under `docs/audits/`. Read-only except the report. |
 | [`standup`](standup/SKILL.md) | Project-state brief: what got done, what is open, what to pick up next. Reads the repo's local tracker (`.scratch/`) and git. Read-only, answers in chat. |
 | [`ticket-flow`](ticket-flow/SKILL.md) | The one-ticket-at-a-time build loop: stage 1 specifies, stage 2 implements test-first on a branch named for the id, stage 3 reviews and merges. Dispatches a bare ticket id on its `Stage:` line. Needs a repo with a local tracker (`docs/agents/issue-tracker.md`) and a bindings block in `AGENTS.md`. |
+| [`foreman`](foreman/SKILL.md) | Supervises one `sweatshop` run from a Claude Code session: `/standup` first, the driver as a background task, a two-sentence check-in every 30 minutes, cleanup and one restart after an environmental crash, and a closing summary of what was produced and what needs the human. |
 | [`sweatshop`](sweatshop/SKILL.md) | The unattended driver for `ticket-flow`: a PowerShell script feeds ticket ids to `claude -p` one at a time, collects every merged ticket of a run on one `sweatshop/*` session branch, and opens a single PR for the human. Writes a run log under the tracker (git-excluded) and updates itself with `git pull` when installed as a checkout. |
 
-All four are user-invoked (`/audit`, `/standup`, `/ticket-flow` or a bare ticket id, `/sweatshop`), never fired automatically.
+All five are user-invoked (`/audit`, `/standup`, `/ticket-flow` or a bare ticket id, `/sweatshop`, `/foreman`), never fired automatically.
 
 ## Install
 
@@ -53,8 +54,8 @@ The folder name is what the user types as `/<name>`, so keep `audit` and
 Not listed? Use whatever directory your tool documents for skills. If it has
 none, the two `SKILL.md` files still work as plain Markdown you read on demand.
 
-Copy with `cp -r audit standup ticket-flow sweatshop <dir>/` or, on Windows
-PowerShell, `Copy-Item audit,standup,ticket-flow,sweatshop <dir> -Recurse`.
+Copy with `cp -r audit standup ticket-flow sweatshop foreman <dir>/` or, on Windows
+PowerShell, `Copy-Item audit,standup,ticket-flow,sweatshop,foreman <dir> -Recurse`.
 
 `sweatshop` updates itself with `git pull` on every run, but only when it runs
 from a checkout of this repo. To get that, keep the clone and symlink instead of

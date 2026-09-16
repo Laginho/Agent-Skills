@@ -86,7 +86,8 @@ it yourself if the user would rather not watch it:
 
 **Running it is fine — backgrounded, then stop.** A foreground call dies on the
 tool's own timeout long before a 45-minute stage ends; a detached one does not.
-Launch it detached, say where the output lands, and end the turn. Do not poll.
+Launch it detached, say where the output lands, and end the turn. Do not poll —
+unless you are running the `foreman` skill, which owns the watching.
 
 What that mode costs: the process belongs to the session that launched it. Close
 the app mid-run and the stage dies with it, leaving a ticket `implementing` that
