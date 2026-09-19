@@ -280,7 +280,9 @@ work. Do not copy this skill into the repo — one copy of the standard is the p
 
     - Gate: `<command that runs typecheck + lint + tests>`
     - Base branch: `<name>`
-    - Models: stage 1 <model>, stage 2 <model>, stage 3 <model>
+    - Models: stage 1 <model>, stage 2 <model> [effort], stage 3 <model> [effort]
+
+O `[effort]` é opcional (`low|medium|high|max`) e só o driver lê; sem ele, `high`.
 
 Tracker paths and ticket shape do **not** go in this block. They are already in
 `docs/agents/issue-tracker.md`.

@@ -63,8 +63,13 @@ $block = (Get-Content $agents -Raw -Encoding UTF8) -split '(?m)^## ' | Where-Obj
 if (-not $block) { throw "No '## Bindings do fluxo' block in $agents" }
 $Gate   = [regex]::Match($block, 'Gate:\s*`([^`]+)`').Groups[1].Value
 $Base   = [regex]::Match($block, 'Base branch:\s*`([^`]+)`').Groups[1].Value
-$Model2 = [regex]::Match($block, 'stage 2 (\w+)').Groups[1].Value.ToLower()
-$Model3 = [regex]::Match($block, 'stage 3 (\w+)').Groups[1].Value.ToLower()
+# Effort is the optional second word: `stage 2 sonnet medium`. Absent, it is high.
+$m2 = [regex]::Match($block, 'stage 2 (\w+)(?: (low|medium|high|xhigh|max))?')
+$m3 = [regex]::Match($block, 'stage 3 (\w+)(?: (low|medium|high|xhigh|max))?')
+$Model2 = $m2.Groups[1].Value.ToLower()
+$Model3 = $m3.Groups[1].Value.ToLower()
+$Effort2 = if ($m2.Groups[2].Success) { $m2.Groups[2].Value } else { 'high' }
+$Effort3 = if ($m3.Groups[2].Success) { $m3.Groups[2].Value } else { 'high' }
 if (-not ($Gate -and $Base -and $Model2 -and $Model3)) { throw "Bindings block incomplete:`n$block" }
 $Loop = $Base   # the loop's base: the session branch once Use-Session picks one
 $GateCmd = ($Gate -split ' ')[0]
@@ -160,10 +165,10 @@ function NextTicket {
 }
 
 # --- one claude session ----------------------------------------------------------
-function RunStage($t, $model, $minutes, $label) {
+function RunStage($t, $model, $effort, $minutes, $label) {
   $log = Join-Path $RunDir ("{0}-{1}-{2}.txt" -f $t.Id, $label, (Get-Date -Format yyyyMMdd-HHmmss))
-  $cliArgs = "-p `"$($t.Id)`" --model $model --effort high --permission-mode acceptEdits --allowedTools $Allowed"
-  Say "$($t.Id) $label ($model, ${minutes}m) -> $log"
+  $cliArgs = "-p `"$($t.Id)`" --model $model --effort $effort --permission-mode acceptEdits --allowedTools $Allowed"
+  Say "$($t.Id) $label ($model $effort, ${minutes}m) -> $log"
   if ($DryRun) { return 'dry-run' }
   $script:LastLog = $log
   $p = Start-Process $ClaudeExe -ArgumentList $cliArgs -WorkingDirectory $Repo -NoNewWindow -PassThru `
@@ -361,7 +366,7 @@ elseif (-not (Select-String -Path $RunLog -SimpleMatch $hdr -Quiet)) {
   # measured: leave them, start a second table.
   Add-Content -Encoding UTF8 $RunLog "`n### Schema change`n`n$hdr`n$sep"
 }
-Say "Gate '$Gate', base '$Base', stage 2 $Model2, stage 3 $Model3"
+Say "Gate '$Gate', base '$Base', stage 2 $Model2 $Effort2, stage 3 $Model3 $Effort3"
 
 try {
 while ($t = NextTicket) {
@@ -371,7 +376,7 @@ while ($t = NextTicket) {
     # branch this attempt created is safe to drop.
     $hadBranch = [bool](git branch --list $t.Branch)
     $started = Get-Date
-    $res = RunStage $t $Model2 $ImplementMinutes 'implement'
+    $res = RunStage $t $Model2 $Effort2 $ImplementMinutes 'implement'
     if ($DryRun) { break }
     $t = Ticket (Join-Path $Repo $t.File)
     if ($t.Stage -ne 'to-review') {
@@ -386,7 +391,7 @@ while ($t = NextTicket) {
     LogStage $t 'implement' $Model2 $attempt 'to-review' $started
   }
   $started = Get-Date
-  $res = RunStage $t $Model3 $ReviewMinutes 'review'
+  $res = RunStage $t $Model3 $Effort3 $ReviewMinutes 'review'
   if ($DryRun) { break }
   Reset-Tree $t
   GitOk pull -q --ff-only
