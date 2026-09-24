@@ -154,7 +154,10 @@ function Use-Session {
     if (-not $DryRun) { GitOk checkout -q $s; GitOk push -q -u origin $s }
   } else {
     $s = 'sweatshop/' + (Get-Date -Format yyyy-MM-dd-HHmm)
-    if (-not $DryRun) { GitOk checkout -q -b $s $Base; GitOk push -q -u origin $s }
+    # The empty commit is load-bearing: a session equal to its base counts as merged
+    # into it, so the search above and ticket-flow's both miss it. Measured
+    # 2026-09-24: SYN-011's review took main as its base and merged a PR there.
+    if (-not $DryRun) { GitOk checkout -q -b $s $Base; GitOk commit -q --allow-empty -m "chore: open session $s"; GitOk push -q -u origin $s }
   }
   $s
 }
