@@ -61,7 +61,7 @@ meets it in the PR, and a conflict there is the human's call.
 - `<tracker>/run-log/<id>-<stage>-<when>.txt`: the session's full output.
 - Under `## Comments` of a ticket, committed on the session: `Attempt N failed:
   <reason>` after a stage 2 that did not reach `to-review`; `Stage: blocked`
-  after the second, or at once when the session ended on a question. An API
+  after the second, or at once when the session ended on a question or committed `blocked` itself (its whole last message is kept). An API
   outage spends no attempt; two in a row stop the run.
 
 Both log paths are in `.git/info/exclude`: local, never in a commit.

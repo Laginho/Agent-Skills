@@ -110,7 +110,7 @@ $Loop = $Base   # the loop's base: the session branch once Use-Session picks one
 $GateCmd = ($Gate -split ' ')[0]
 # Prefix form `Bash(x:*)`, not glob `Bash(x *)`: measured 2026-09-12, `Bash(npx *)`
 # was denied while `Bash(npx:*)` ran.
-$Allowed = ('Bash(git:*)', 'Bash(gh:*)', "Bash(${GateCmd}:*)", 'Bash(npx:*)', 'Read', 'Edit', 'Write', 'Glob', 'Grep' | ForEach-Object { "`"$_`"" }) -join ' '
+$Allowed = ('Bash(git:*)', 'Bash(gh:*)', "Bash(${GateCmd}:*)", 'Bash(npx:*)', 'Read', 'Edit', 'Write', 'Glob', 'Grep', 'Agent' | ForEach-Object { "`"$_`"" }) -join ' '
 
 # --- local-only files (never dirty the tree) -----------------------------------
 $RunLog = Join-Path $Repo "$Tracker/run-log.md"
@@ -437,6 +437,10 @@ while ($t = NextTicket) {
     $t = Ticket (Join-Path $Repo $t.File)
     if ($t.Stage -ne 'to-review') {
       $tail = LogTail $script:LastLog; $why = Verdict $script:LastLog
+      # A session that committed `blocked` itself stopped to ask, question mark or not.
+      # Measured 2026-09-24: PHY-32 ended on prose, read as a failure, burned attempt 2
+      # and lost its question with the dropped branch. Keep the whole last message.
+      if ($t.Stage -eq 'blocked') { $why = 'asked'; $tail = LogTail $script:LastLog 6000 }
       Reset-Tree $t -DropBranch:(-not $hadBranch)
       if ($why -eq 'api-error') { NetFail $tail; LogStage $t 'implement' $Model2 $attempt 'api error, not counted' $started; continue }
       if ($why -eq 'asked') { Note $t "Attempt $attempt stopped to ask: $tail" 'blocked'; LogStage $t 'implement' $Model2 $attempt 'asked, blocked' $started; continue }

@@ -39,8 +39,10 @@ Two sentences in chat, from two sources:
 Add elapsed minutes on the current stage only when it exceeds the median for
 that stage in `run-log.md`: that number is the one hint of a hang.
 
-Silence is the default: a check-in that says "all fine" stays in chat, never a
-push notification.
+Every check-in reports, even when nothing moved: "Still implementing C, 12 min
+in, nothing new" is the report. It goes in chat and as a push notification,
+because the human is often away from the screen. The beep stays for trouble
+only.
 
 ## 3. Crash
 
@@ -65,9 +67,18 @@ you report and stop; a logic failure restarted is the same failure paid twice.
 
 ## 4. Hands off
 
-The human's calls stay the human's: `blocked` questions, the session PR merge,
-any edit to code on the session branch. An edit you would have made is a line
-in the summary, not a commit. Subagents: none; you read files and run the driver.
+The human's calls stay the human's: questions the proxy escalated, the session
+PR merge, any edit to code on the session branch. An edit you would have made is
+a line in the summary, not a commit. Subagents: only the proxy.
+
+**A `blocked` ticket with no `Proxy escalated` line is not the human's yet.**
+It came from a runtime or a session that did not ask the proxy. Spawn the repo's
+`proxy` agent with the ticket id, the question and the evidence from `## Comments`
+and the stage's `.txt`, and follow `ticket-flow`'s "Asking the proxy": record
+`Proxy decided` (folded into the body when it changes the contract) and set
+`to-implement`, or record `Proxy escalated`. Commit on the session branch, then
+relaunch the driver once the run is over. A relaunch for proxy answers is not
+the one restart of section 3.
 
 ## 5. Summary (when the task ends)
 
@@ -75,7 +86,8 @@ Stop the check-ins. One message in chat, then notify. Three blocks:
 
 - **Produced** — the session PR's body, in its order: `Needs your call` and
   `Review: human` first, `Approve` lines after. Link the PR.
-- **Foreman** — restarts, cleanups, anything you noticed and left alone.
+- **Foreman** — restarts, cleanups, every `Proxy decided` line, anything you
+  noticed and left alone.
 - **Your turn** — one line per action only the human can take: this ticket
   needs your decision (quote the question from `## Comments`), this PR needs your
   review, this stage is stuck and I did not touch it.

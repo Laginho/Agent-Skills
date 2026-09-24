@@ -256,10 +256,12 @@ own: everything a session
 does, it does because this file says so. Nobody is watching, so a session owes it
 three things:
 
-- **A question is a `blocked`.** There is no one to answer "which do you want?".
-  Stage 2 that needs a decision (a seam the ticket does not name, a blank the
-  spec left) touches nothing, sets `Stage: blocked` with the question under
-  `## Comments`, commits, and stops. Stage 3 that is unsure writes `Needs your
+- **A question goes to the proxy; only an escalation is a `blocked`.** There is
+  no one to answer "which do you want?". Stage 2 that needs a decision (a seam
+  the ticket does not name, a blank the spec left) asks the proxy first — see
+  "Asking the proxy" below. Only when the proxy escalates, or no proxy exists,
+  does it touch nothing, set `Stage: blocked` with the question under
+  `## Comments`, commit, and stop. Stage 3 that is unsure writes `Needs your
   call` and finishes; it never ends at `reviewing` asking what to do.
 - **One stage per session.** Stage 2 stops the moment `to-review` is committed;
   it does not review its own work. Stage 3 stops at `done`, `to-merge`,
@@ -274,6 +276,31 @@ each answer into the ticket body (Primary files, a criterion, a filled blank),
 set `to-implement`, commit on the loop's base, run the driver again. Everything
 else about the driver — the session branch, the run log, how to start it — is in
 `sweatshop/SKILL.md`.
+
+## Asking the proxy
+
+The human stops the loop only for what the human alone can decide. Everything
+else goes to the **proxy**: the repo's `proxy` agent card (`.claude/agents/proxy.md`),
+a stand-in human on its own model. It holds in every stage and every session,
+attended or not.
+
+1. **Spawn it** with the ticket id, the question as you would have written it
+   under `## Comments`, and the evidence you gathered (measurements, the options
+   you tried). It answers `Decision: …` or `Escalate: …` on its first line.
+2. **`Decision`**: record it under `## Comments` as `Proxy decided: <answer> —
+   <its reason, one line>`. When the answer changes the contract, fold it into
+   the body the way stage 1 would (Primary files, a criterion, a filled blank).
+   Commit both with the next commit of the stage, then carry on as if the human
+   had answered.
+3. **`Escalate`**: the old path. `Stage: blocked`, the question and
+   `Proxy escalated: <why>` under `## Comments`, commit, stop.
+4. **No card, or a runtime that cannot spawn one** (Codex): the old path, with
+   no proxy line.
+
+The proxy escalates only when there is no way forward without the human, or a
+wrong answer is irreversible or expensive to undo. Stage 3 names every `Proxy
+decided` line of the ticket in its findings, so the session PR shows what was
+decided on the human's behalf.
 
 ## A repo with no bindings block
 
