@@ -98,6 +98,9 @@ and show where its output lands. These are the corresponding commands:
     & "<skills-dir>\sweatshop\scripts\sweatshop.ps1" "<repo>"
     & "<skills-dir>\sweatshop\scripts\sweatshop-codex.ps1" "<repo>"
 
+Runs on different repos can go in parallel, one session each; a second run on a
+repo that already has one is refused.
+
 Run it in a background terminal/session: a foreground tool call can time out
 before a stage ends. Say where the output lands and end the turn. Do not poll
 unless running `foreman`, which owns the watching.

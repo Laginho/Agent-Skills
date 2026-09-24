@@ -34,13 +34,24 @@ function GitOk {
   $out | Where-Object { $_ -isnot [Management.Automation.ErrorRecord] } | ForEach-Object { "$_" }
 }
 function Say($m) { Write-Host ("[{0}] {1}" -f (Get-Date -Format HH:mm:ss), $m) }
+# Runs in parallel on other repos share this machine. A named mutex dies with its
+# process, so a killed run never leaves one held. $null when $ms runs out.
+function Lock($name, $ms) {
+  $m = [Threading.Mutex]::new($false, $name)
+  try { if (-not $m.WaitOne($ms)) { $m.Dispose(); return $null } } catch [Threading.AbandonedMutexException] { }
+  $m
+}
 
 # --- self-update ------------------------------------------------------------------
 # Two machines run this; the one that pulled last must not run a stale driver. A
 # failed pull stops the run: there is no offline case, claude needs the network too.
+# One at a time: parallel runs pulling this checkout at once fight over index.lock.
+$upd = Lock 'sweatshop-self-update' -1
+try {
 if (-not (git -C $PSScriptRoot rev-parse --is-inside-work-tree 2>$null)) { Say 'driver: a copy, not a checkout; not updated' }
 elseif (GitOk -C $PSScriptRoot status --porcelain) { Say 'driver: local edits, not updated' }
 else { GitOk -C $PSScriptRoot pull -q --ff-only | Out-Null; Say "driver: $(GitOk -C $PSScriptRoot rev-parse --short HEAD)" }
+} finally { $upd.ReleaseMutex(); $upd.Dispose() }
 
 if ($Runtime -eq 'Claude') {
   # `claude` may not be on PATH: probe the installs the app and the CLI use.
@@ -258,7 +269,8 @@ function Note($t, $line, $stage) {
   if ($stage) { $text = $text -replace '(?m)^(\*{0,2}Stage\*{0,2}:\*{0,2})\s*.+$', "`$1 $stage" }
   [IO.File]::WriteAllText((Join-Path $Repo $t.File), $text, [Text.UTF8Encoding]::new($false))
   # -F, not -m: a log tail with quotes or `--flags` inside splits into git options under PS 5.1.
-  $msg = Join-Path $env:TEMP 'sweatshop-commit.txt'
+  # $PID: runs on other repos share %TEMP%; one fixed name commits their message here.
+  $msg = Join-Path $env:TEMP "sweatshop-commit-$PID.txt"
   $subject, $body = $line -split ' Log tail: ', 2
   [IO.File]::WriteAllText($msg, "chore: $subject ($($t.Id))$(if ($body) { "`n`nLog tail: $body" })", [Text.UTF8Encoding]::new($false))
   GitOk add $t.File; GitOk commit -q -F $msg | Out-Null
@@ -319,7 +331,7 @@ function Publish-Session {
   GitOk push -q
   $files = @(git diff --name-only "$Base...$Loop" -- "$Tracker/*/issues/*")
   $done = @(foreach ($f in $files) { if (Test-Path $f) { $t = Ticket (Join-Path $Repo $f); if ($t.Id -and $t.Stage -eq 'done') { $t } } })
-  $body = Join-Path $env:TEMP 'sweatshop-pr.md'
+  $body = Join-Path $env:TEMP "sweatshop-pr-$PID.md"
   [IO.File]::WriteAllText($body, (PrBody $done), [Text.UTF8Encoding]::new($false))
   # gh is a native command: a failure is only an exit code, so check it or the run
   # ends saying "session PR:" with nothing after the colon.
@@ -360,7 +372,7 @@ if ($SelfCheck) {
     if ((Field "# T-1: x`n$shape`n" 'Stage') -ne 'to-review') { throw "Field: $shape" }
   }
   # Verdict decides whether an attempt is spent; the shapes are the two real logs of 2026-09-14.
-  $tmp = Join-Path $env:TEMP 'sweatshop-verdict.txt'
+  $tmp = Join-Path $env:TEMP "sweatshop-verdict-$PID.txt"
   foreach ($case in @(@("API Error: Unable to connect to API (ENOTFOUND)`n", 'api-error'),
                       @("Three options.`n`nWhich one do you want?`n", 'asked'),
                       @("Done for stage 2, gate green.`n", 'failed'))) {
@@ -379,12 +391,23 @@ if ($SelfCheck) {
   $leak = @(GitOk -C $tmp checkout -b probe)
   Remove-Item -Recurse -Force $tmp
   if ($leak.Count) { throw "GitOk: stderr leaked into output: $($leak -join ' / ')" }
+  # Lock is all that keeps two drivers off one repo: a second process must not get it.
+  $l = Lock "sweatshop-selfcheck-$PID" 0
+  $other = powershell -NoProfile -Command "[Threading.Mutex]::new(`$false, 'sweatshop-selfcheck-$PID').WaitOne(0)"
+  $l.ReleaseMutex(); $l.Dispose()
+  if ("$other" -ne 'False') { throw "Lock: a second process got it ($other)" }
   Write-Host 'Self-check OK'; exit 0
 }
 
 # --- main loop --------------------------------------------------------------------
 # The tree reads off the session, so it comes after Use-Session -- but a run
 # Preflight refuses should still tell you where you are.
+# Two drivers on one worktree would check out branches under each other.
+if (-not $DryRun) {
+  $RepoLock = Lock ('sweatshop-repo-' + ($Repo.ToLower() -replace '[\\/:]', '_')) 0
+  if (-not $RepoLock) { throw "Another sweatshop is already running on $Repo." }
+}
+try {
 try { if (-not $DryRun) { Preflight } } catch { ShowTree 'Before this run (refused)'; throw }
 $session = @(Use-Session)[-1]   # [-1]: the branch is emitted last, so git chatter cannot ride out
 Say "session: $session$(if ($DryRun) { ' (dry run: not checked out, tree read off the base)' })"
@@ -451,3 +474,4 @@ if (-not $DryRun) { Say 'Nothing runnable. Done.' }
   }
   ShowSummary
 }
+} finally { if ($RepoLock) { $RepoLock.ReleaseMutex(); $RepoLock.Dispose() } }
