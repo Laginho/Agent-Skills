@@ -110,7 +110,7 @@ $Loop = $Base   # the loop's base: the session branch once Use-Session picks one
 $GateCmd = ($Gate -split ' ')[0]
 # Prefix form `Bash(x:*)`, not glob `Bash(x *)`: measured 2026-09-12, `Bash(npx *)`
 # was denied while `Bash(npx:*)` ran.
-$Allowed = ('Bash(git:*)', 'Bash(gh:*)', "Bash(${GateCmd}:*)", 'Bash(npx:*)', 'Read', 'Edit', 'Write', 'Glob', 'Grep', 'Agent' | ForEach-Object { "`"$_`"" }) -join ' '
+$Allowed = ('Bash(git:*)', 'Bash(gh:*)', "Bash(${GateCmd}:*)", 'Bash(npx:*)', 'Bash(node:*)', 'Read', 'Edit', 'Write', 'Glob', 'Grep', 'Agent' | ForEach-Object { "`"$_`"" }) -join ' '
 
 # --- local-only files (never dirty the tree) -----------------------------------
 $RunLog = Join-Path $Repo "$Tracker/run-log.md"
