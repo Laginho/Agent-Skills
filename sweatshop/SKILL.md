@@ -86,6 +86,11 @@ instead of guessing a model. For example:
     - Models: stage 1 opus, stage 2 sonnet high, stage 3 opus high
     - Models (Codex): stage 1 gpt-6-sol, stage 2 gpt-6-luna high, stage 3 gpt-6-sol high
 
+Codex stages run with `--dangerously-bypass-approvals-and-sandbox`: on Windows
+its sandbox keeps `.git` read-only and cannot reach the keyring, so a sandboxed
+stage can neither commit nor push. Claude stages are held to a tool allowlist;
+Codex stages are held only by `~/.codex/rules`. Say so before a first Codex run.
+
 The repo is the current one when its `AGENTS.md` carries the `## Bindings do
 fluxo` block; otherwise ask which. When asked to run, launch the selected script
 and show where its output lands. These are the corresponding commands:

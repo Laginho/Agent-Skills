@@ -51,7 +51,11 @@ if ($Runtime -eq 'Claude') {
     "$env:APPDATA\npm\claude.cmd"
   )
 } else {
-  $probe = @("$env:LOCALAPPDATA\OpenAI\Codex\bin\*\codex.exe", "$env:APPDATA\npm\codex.cmd")
+  $probe = @(
+    "$env:LOCALAPPDATA\Programs\OpenAI\Codex\bin\codex.exe"
+    "$env:LOCALAPPDATA\OpenAI\Codex\bin\*\codex.exe"
+    "$env:APPDATA\npm\codex.cmd"
+  )
 }
 $AgentExe = (Get-Command $Runtime.ToLower() -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
 if (-not $AgentExe) {
@@ -190,7 +194,10 @@ function RunStage($t, $model, $effort, $minutes, $label) {
   $cliArgs = if ($Runtime -eq 'Claude') {
     "-p `"$($t.Id)`" --model $model --effort $effort --permission-mode acceptEdits --allowedTools $Allowed"
   } else {
-    "exec --model $model --config model_reasoning_effort=$effort --sandbox workspace-write --approve-for-me --config sandbox_workspace_write.network_access=true --json --output-last-message `"$log.final`" `"$($t.Id)`""
+    # Unsandboxed: measured 2026-09-24, the Windows workspace-write sandbox keeps
+    # .git read-only and cannot reach the keyring, so no commit, push or gh.
+    # Unlike Claude's allowlist, nothing limits commands but ~/.codex/rules.
+    "exec --model $model --config model_reasoning_effort=$effort --dangerously-bypass-approvals-and-sandbox --json --output-last-message `"$log.final`" `"$($t.Id)`""
   }
   Say "$($t.Id) $label ($model $effort, ${minutes}m) -> $log"
   if ($DryRun) { Say "$AgentExe $cliArgs"; return 'dry-run' }
