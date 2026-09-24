@@ -196,6 +196,21 @@ test, or touches source outside the Primary files, stage 3 does not fix it:
 reopen, back to stage 2. No exceptions — a reviewer judging size by feel will
 always find its own findings small.
 
+**Stage 3 reviews against the written contract, every finding in one pass.**
+A reopen is earned by one of three things: a numbered criterion the code does
+not meet, a Primary-files or test-first rule broken (`git diff --stat` of each
+commit after the test-only one: no test file touched), or a regression — the
+change broke something that worked before it. A requirement the criteria do not
+state is none of these, however sensible: it becomes a `CLEAN-*` ticket and the
+review approves on the criteria as written. Stage 3 never rewrites a criterion's
+text; only stage 1 does. Read the whole diff before writing the verdict and list
+every finding in that verdict — a finding held back for the next pass costs a
+full stage-2 cycle. A re-review checks the ❌ items and the diff since the last
+review; a new finding in code the previous pass already read is named as that
+pass's miss. Measured 2026-09-24: SYN-010 took two extra cycles (52% of its
+time) for findings that were all visible in the first pass, two of them new
+requirements.
+
 **A finding that belongs to another ticket goes under `## Comments` on that
 ticket — never into its body.** Only stage 1 moves a comment into the body, and
 when it does it adds the file to Primary files and a numbered criterion. An
