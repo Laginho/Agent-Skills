@@ -23,8 +23,16 @@ Otherwise launch the runtime's driver as a **background task** of this session
 (Claude Code's Bash background mode or a Codex terminal session; use the script
 selected by `sweatshop`). Note the
 launch time and the last row of `<tracker>/run-log.md`: everything after that row
-is this run. In Claude Code, start `/loop 30m`; in Codex, use a 30-minute thread
-heartbeat for the check-in below.
+is this run. In Claude Code, the check-in clock is a background Bash
+`sleep 1800` that you re-arm on every wake: its completion notice always wakes
+you. Not `/loop` or a cron job: measured 2026-09-24, one never fired and nobody
+noticed for 30 minutes. In Codex, use a 30-minute thread heartbeat.
+
+Never hold `<tracker>/run-log.md` open. On Windows a `tail -F` on it locks out
+the driver's `Add-Content`, and the driver crashes on its next row. `TaskStop`
+leaves the `tail` orphaned, so the lock outlives the monitor; measured
+2026-09-24, it crashed the driver twice. To watch for trouble, poll the
+driver's own task output every 30 s instead.
 
 ## 2. Check-in (every 30 minutes)
 
