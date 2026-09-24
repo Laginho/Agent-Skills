@@ -254,7 +254,7 @@ The `sweatshop` skill's driver feeds bare ids to fresh Claude Code or Codex CLI
 sessions, one at a time, and reads `Stage:` back. It adds no instructions of its
 own: everything a session
 does, it does because this file says so. Nobody is watching, so a session owes it
-three things:
+four things:
 
 - **A question goes to the proxy; only an escalation is a `blocked`.** There is
   no one to answer "which do you want?". Stage 2 that needs a decision (a seam
@@ -263,6 +263,11 @@ three things:
   does it touch nothing, set `Stage: blocked` with the question under
   `## Comments`, commit, and stop. Stage 3 that is unsure writes `Needs your
   call` and finishes; it never ends at `reviewing` asking what to do.
+- **Nothing in the background.** A headless session ends when its turn does, and
+  a gate or build left running in the background dies with it, unread. Run every
+  command in the foreground and read its result before the next step.
+  Measured 2026-09-24: a PHY-23 review backgrounded the gate and ended at
+  `to-review` two minutes in.
 - **One stage per session.** Stage 2 stops the moment `to-review` is committed;
   it does not review its own work. Stage 3 stops at `done`, `to-merge`,
   `to-implement` or `blocked`, nothing else.
