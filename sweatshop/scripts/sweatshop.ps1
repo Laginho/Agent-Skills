@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
-  Sweatshop: the unattended ticket-flow driver. Feeds bare ticket ids to
-  `claude -p`, one at a time, implement then review, and reads `Stage:` back.
+  Sweatshop: the unattended ticket-flow driver. Feeds bare ticket ids to fresh
+  Claude Code or Codex CLI sessions, implement then review, and reads `Stage:` back.
   Merged tickets collect on one `sweatshop/*` session branch; one PR at the end.
   Adds no instructions of its own: behaviour lives in ticket-flow/SKILL.md.
 
@@ -15,7 +15,8 @@ param(
   [int]$ImplementMinutes = 45,
   [int]$ReviewMinutes = 20,
   [switch]$DryRun,
-  [switch]$SelfCheck
+  [switch]$SelfCheck,
+  [ValidateSet('Claude', 'Codex')][string]$Runtime = 'Claude'
 )
 $ErrorActionPreference = 'Stop'
 Set-Location $Repo
@@ -41,21 +42,32 @@ if (-not (git -C $PSScriptRoot rev-parse --is-inside-work-tree 2>$null)) { Say '
 elseif (GitOk -C $PSScriptRoot status --porcelain) { Say 'driver: local edits, not updated' }
 else { GitOk -C $PSScriptRoot pull -q --ff-only | Out-Null; Say "driver: $(GitOk -C $PSScriptRoot rev-parse --short HEAD)" }
 
-# `claude` may not be on PATH: probe the installs the app and the CLI use.
-$ClaudeProbe = @(
-  "$env:APPDATA\Claude\claude-code\*\claude.exe"
-  "$env:USERPROFILE\AppData\Roaming\Claude\claude-code\*\claude.exe"
-  "$env:USERPROFILE\.local\bin\claude.exe"
-  "$env:APPDATA\npm\claude.cmd"
-)
-$ClaudeExe = (Get-Command claude -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
-if (-not $ClaudeExe) {
-  $ClaudeExe = $ClaudeProbe | ForEach-Object { Get-ChildItem $_ -ErrorAction SilentlyContinue } |
+if ($Runtime -eq 'Claude') {
+  # `claude` may not be on PATH: probe the installs the app and the CLI use.
+  $probe = @(
+    "$env:APPDATA\Claude\claude-code\*\claude.exe"
+    "$env:USERPROFILE\AppData\Roaming\Claude\claude-code\*\claude.exe"
+    "$env:USERPROFILE\.local\bin\claude.exe"
+    "$env:APPDATA\npm\claude.cmd"
+  )
+} else {
+  $probe = @("$env:LOCALAPPDATA\OpenAI\Codex\bin\*\codex.exe", "$env:APPDATA\npm\codex.cmd")
+}
+$AgentExe = (Get-Command $Runtime.ToLower() -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+if (-not $AgentExe) {
+  $AgentExe = $probe | ForEach-Object { Get-ChildItem $_ -ErrorAction SilentlyContinue } |
     Sort-Object { try { [version]$_.Directory.Name } catch { [version]"0.0.0" } } |
     Select-Object -Last 1 -ExpandProperty FullName
 }
-if (-not $ClaudeExe) { throw "No claude CLI found. Tried PATH and:`n  $($ClaudeProbe -join "`n  ")" }
-Say "claude: $ClaudeExe"
+if (-not $AgentExe) { throw "No $Runtime CLI found. Tried PATH and:`n  $($probe -join "`n  ")" }
+Say "${Runtime}: $AgentExe"
+if ($Runtime -eq 'Codex' -and -not ($DryRun -or $SelfCheck)) {
+  $ErrorActionPreference = 'Continue'
+  $null = & $AgentExe login status 2>&1
+  $loginCode = $LASTEXITCODE
+  $ErrorActionPreference = 'Stop'
+  if ($loginCode) { throw 'Codex CLI is not logged in. Run codex login before starting the driver.' }
+}
 
 # --- bindings -----------------------------------------------------------------
 $agents = if (Test-Path AGENTS.md) { 'AGENTS.md' } else { 'CLAUDE.md' }
@@ -63,14 +75,22 @@ $block = (Get-Content $agents -Raw -Encoding UTF8) -split '(?m)^## ' | Where-Obj
 if (-not $block) { throw "No '## Bindings do fluxo' block in $agents" }
 $Gate   = [regex]::Match($block, 'Gate:\s*`([^`]+)`').Groups[1].Value
 $Base   = [regex]::Match($block, 'Base branch:\s*`([^`]+)`').Groups[1].Value
-# Effort is the optional second word: `stage 2 sonnet medium`. Absent, it is high.
-$m2 = [regex]::Match($block, 'stage 2 (\w+)(?: (low|medium|high|xhigh|max))?')
-$m3 = [regex]::Match($block, 'stage 3 (\w+)(?: (low|medium|high|xhigh|max))?')
+# A legacy `Models:` line belongs to Claude. Codex uses an explicit line in the
+# same repo binding, so neither runtime can silently borrow the other's models.
+$models = if ($Runtime -eq 'Codex') {
+  [regex]::Match($block, '(?im)^\s*-\s*Models \(Codex\):\s*(.+)$').Groups[1].Value
+} else {
+  $named = [regex]::Match($block, '(?im)^\s*-\s*Models \(Claude\):\s*(.+)$').Groups[1].Value
+  if ($named) { $named } else { [regex]::Match($block, '(?im)^\s*-\s*Models:\s*(.+)$').Groups[1].Value }
+}
+# Effort is optional: `stage 2 gpt-6-luna high`. Absent, it is high.
+$m2 = [regex]::Match($models, 'stage 2 ([\w.-]+)(?: (low|medium|high|xhigh|max|ultra))?')
+$m3 = [regex]::Match($models, 'stage 3 ([\w.-]+)(?: (low|medium|high|xhigh|max|ultra))?')
 $Model2 = $m2.Groups[1].Value.ToLower()
 $Model3 = $m3.Groups[1].Value.ToLower()
 $Effort2 = if ($m2.Groups[2].Success) { $m2.Groups[2].Value } else { 'high' }
 $Effort3 = if ($m3.Groups[2].Success) { $m3.Groups[2].Value } else { 'high' }
-if (-not ($Gate -and $Base -and $Model2 -and $Model3)) { throw "Bindings block incomplete:`n$block" }
+if (-not ($Gate -and $Base -and $Model2 -and $Model3)) { throw "Bindings block incomplete for $Runtime (Gate, Base branch, Models ($Runtime)):`n$block" }
 $Loop = $Base   # the loop's base: the session branch once Use-Session picks one
 $GateCmd = ($Gate -split ' ')[0]
 # Prefix form `Bash(x:*)`, not glob `Bash(x *)`: measured 2026-09-12, `Bash(npx *)`
@@ -164,14 +184,18 @@ function NextTicket {
   $all | Where-Object { $_.Stage -eq 'to-implement' -and -not ($_.BlockedBy | Where-Object { $_ -notin $done }) } | Select-Object -First 1
 }
 
-# --- one claude session ----------------------------------------------------------
+# --- one fresh CLI session -------------------------------------------------------
 function RunStage($t, $model, $effort, $minutes, $label) {
   $log = Join-Path $RunDir ("{0}-{1}-{2}.txt" -f $t.Id, $label, (Get-Date -Format yyyyMMdd-HHmmss))
-  $cliArgs = "-p `"$($t.Id)`" --model $model --effort $effort --permission-mode acceptEdits --allowedTools $Allowed"
+  $cliArgs = if ($Runtime -eq 'Claude') {
+    "-p `"$($t.Id)`" --model $model --effort $effort --permission-mode acceptEdits --allowedTools $Allowed"
+  } else {
+    "exec --model $model --config model_reasoning_effort=$effort --sandbox workspace-write --approve-for-me --config sandbox_workspace_write.network_access=true --json --output-last-message `"$log.final`" `"$($t.Id)`""
+  }
   Say "$($t.Id) $label ($model $effort, ${minutes}m) -> $log"
-  if ($DryRun) { return 'dry-run' }
+  if ($DryRun) { Say "$AgentExe $cliArgs"; return 'dry-run' }
   $script:LastLog = $log
-  $p = Start-Process $ClaudeExe -ArgumentList $cliArgs -WorkingDirectory $Repo -NoNewWindow -PassThru `
+  $p = Start-Process $AgentExe -ArgumentList $cliArgs -WorkingDirectory $Repo -NoNewWindow -PassThru `
         -RedirectStandardOutput $log -RedirectStandardError "$log.err"
   $null = $p.Handle   # PS 5.1: without touching Handle, ExitCode reads back as null
   if (-not $p.WaitForExit($minutes * 60 * 1000)) {
@@ -181,8 +205,8 @@ function RunStage($t, $model, $effort, $minutes, $label) {
   # A session that dies before doing anything (auth, bad flags) is our problem,
   # not the ticket's: stop the run instead of blaming the ticket and retrying.
   # Measured 2026-09-14: a dropped internet connection prints only `Execution error`.
-  if ($p.ExitCode -ne 0 -and (Get-Item $log).Length -lt 300) {
-    Add-Content $log "`nAPI Error: claude exited $($p.ExitCode) before doing anything`n$(Get-Content "$log.err" -Raw)"
+  if ($p.ExitCode -ne 0 -and ($Runtime -eq 'Codex' -or (Get-Item $log).Length -lt 300)) {
+    Add-Content $log "`nAPI Error: $Runtime exited $($p.ExitCode)`n$(Get-Content "$log.err" -Raw)"
   }
   $code = $p.ExitCode; $p.Dispose()
   return 'exit ' + $(if ($null -eq $code) { '?' } else { $code })
@@ -190,7 +214,8 @@ function RunStage($t, $model, $effort, $minutes, $label) {
 
 # The session's last words, one line: when stage 2 stops to ask, this is the question.
 function LogTail($log, $chars = 1200) {
-  $text = [IO.File]::ReadAllText($log)   # not Get-Content: works while the redirect handle is still open
+  $source = if ($Runtime -eq 'Codex' -and (Test-Path "$log.final") -and (Get-Item "$log.final").Length) { "$log.final" } else { $log }
+  $text = [IO.File]::ReadAllText($source)   # not Get-Content: works while the redirect handle is still open
   if ($text.Length -gt $chars) { $text = '...' + $text.Substring($text.Length - $chars) }
   ($text -replace '\r?\n', ' / ').Trim()
 }
@@ -201,6 +226,7 @@ function LogTail($log, $chars = 1200) {
 function Verdict($log) {
   $text = [IO.File]::ReadAllText($log).TrimEnd()
   if ($text -match '(?m)^API Error') { return 'api-error' }
+  if ($Runtime -eq 'Codex' -and (Test-Path "$log.final")) { $text = [IO.File]::ReadAllText("$log.final").TrimEnd() }
   if ($text -match '\?\W*$') { return 'asked' }
   'failed'
 }

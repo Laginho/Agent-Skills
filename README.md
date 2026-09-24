@@ -8,8 +8,8 @@ Five skills for coding agents. Provider-agnostic: a skill is a folder with a
 | [`audit`](audit/SKILL.md) | Whole-repo code audit ending in a verdict — Approved / Approved with cleanup / Not approved — and a written report under `docs/audits/`. Read-only except the report. |
 | [`standup`](standup/SKILL.md) | Project-state brief: what got done, what is open, what to pick up next. Reads the repo's local tracker (`.scratch/`) and git. Read-only, answers in chat. |
 | [`ticket-flow`](ticket-flow/SKILL.md) | The one-ticket-at-a-time build loop: stage 1 specifies, stage 2 implements test-first on a branch named for the id, stage 3 reviews and merges. Dispatches a bare ticket id on its `Stage:` line. Needs a repo with a local tracker (`docs/agents/issue-tracker.md`) and a bindings block in `AGENTS.md`. |
-| [`foreman`](foreman/SKILL.md) | Supervises one `sweatshop` run from a Claude Code session: `/standup` first, the driver as a background task, a two-sentence check-in every 30 minutes, cleanup and one restart after an environmental crash, and a closing summary of what was produced and what needs the human. |
-| [`sweatshop`](sweatshop/SKILL.md) | The unattended driver for `ticket-flow`: a PowerShell script feeds ticket ids to `claude -p` one at a time, collects every merged ticket of a run on one `sweatshop/*` session branch, and opens a single PR for the human. Writes a run log under the tracker (git-excluded) and updates itself with `git pull` when installed as a checkout. |
+| [`foreman`](foreman/SKILL.md) | Supervises one `sweatshop` run: standup, a background driver, 30-minute check-ins, crash handling, and a closing summary for the human. |
+| [`sweatshop`](sweatshop/SKILL.md) | The unattended driver for `ticket-flow`: separate PowerShell entry scripts launch fresh Claude Code or Codex CLI sessions, one stage at a time, collect merged tickets on one `sweatshop/*` branch, and open a single PR. |
 
 All five are user-invoked (`/audit`, `/standup`, `/ticket-flow` or a bare ticket id, `/sweatshop`, `/foreman`), never fired automatically.
 
@@ -30,8 +30,8 @@ A skill is instructions you will later execute, so read before you copy. Read
 every `SKILL.md` in full and confirm each one still matches this description:
 
 - no scripts, no network calls, no reading credentials or environment tokens —
-  except `sweatshop`, whose one script is `sweatshop/scripts/sweatshop.ps1`:
-  it runs `git`, `gh` and `claude`, and nothing else
+  except `sweatshop`, whose scripts are under `sweatshop/scripts/`:
+  they run `git`, `gh`, and the invoking agent's CLI
 - no `allowed-tools` in the frontmatter (that grants tools without asking)
 - writes limited to what the table above says — `audit` writes its report,
   `standup` writes nothing

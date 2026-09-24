@@ -1,12 +1,13 @@
 ---
 name: sweatshop
-description: The unattended driver for the ticket-flow loop — feeds ticket ids to claude one at a time, collects every merged ticket of a run on one session branch, and opens a single PR for the human. Use when asked to start the driver ("roda o loop", "start the unattended run", "/sweatshop"), or to explain the run log or the session PR.
+description: The unattended ticket-flow driver — runs fresh Claude Code or Codex CLI sessions, one stage at a time, and collects merged tickets in one session PR. Use when asked to start the driver ("roda o loop", "start the unattended run", "/sweatshop"), or to explain its run log or PR.
 ---
 
 # Sweatshop
 
-`scripts/sweatshop.ps1 <repo>` runs the `ticket-flow` loop with nobody watching:
-bare ids into `claude -p`, one stage per session, `Stage:` read back. **It adds
+`scripts/sweatshop.ps1 <repo>` runs Claude Code;
+`scripts/sweatshop-codex.ps1 <repo>` runs Codex. Each sends bare ids into a fresh CLI session, one stage at a
+time, then reads `Stage:` back. **The driver adds
 no instructions of its own.** Everything a session does, it does because
 `ticket-flow/SKILL.md` says so; this file owns only the driver.
 
@@ -71,29 +72,35 @@ stand now; the log is what happened while nobody watched.
 
 ## Starting one
 
-Asked to start the driver, you find the script — the user should never have to.
-It is `scripts/sweatshop.ps1` next to this file, under whatever directory the
-tool installed the skill into (`~/.claude/skills/sweatshop/`,
-`~/.agents/skills/sweatshop/`, …). Resolve it from where this file was loaded;
-one recursive search for `sweatshop.ps1` from the skills directory if you do not
-know that.
+Asked to start the driver, find the script next to this file — the user should
+never have to. In Claude Code run `scripts/sweatshop.ps1`; in Codex run
+`scripts/sweatshop-codex.ps1`. Resolve it from where this file was loaded; one
+recursive search from the skills directory if needed. Never select the runtime
+from which CLIs happen to be installed: both can be installed on one machine.
+
+The target repo's `## Bindings do fluxo` block supplies models for each runtime.
+`Models:` remains the Claude line for existing repos; `Models (Claude):` may
+replace it. Codex requires `Models (Codex):`. The driver refuses a missing line
+instead of guessing a model. For example:
+
+    - Models: stage 1 opus, stage 2 sonnet high, stage 3 opus high
+    - Models (Codex): stage 1 gpt-6-sol, stage 2 gpt-6-luna high, stage 3 gpt-6-sol high
 
 The repo is the current one when its `AGENTS.md` carries the `## Bindings do
-fluxo` block; otherwise ask which. Then hand over one copy-ready line, or launch
-it yourself if the user would rather not watch it:
+fluxo` block; otherwise ask which. When asked to run, launch the selected script
+and show where its output lands. These are the corresponding commands:
 
     & "<skills-dir>\sweatshop\scripts\sweatshop.ps1" "<repo>"
+    & "<skills-dir>\sweatshop\scripts\sweatshop-codex.ps1" "<repo>"
 
-**Running it is fine — backgrounded, then stop.** A foreground call dies on the
-tool's own timeout long before a 45-minute stage ends; a detached one does not.
-Launch it detached, say where the output lands, and end the turn. Do not poll —
-unless you are running the `foreman` skill, which owns the watching.
+Run it in a background terminal/session: a foreground tool call can time out
+before a stage ends. Say where the output lands and end the turn. Do not poll
+unless running `foreman`, which owns the watching.
 
-What that mode costs: the process belongs to the session that launched it. Close
-the app mid-run and the stage dies with it, leaving a ticket `implementing` that
-the next run's Preflight refuses until a human puts the stage back. So when the
-user is at the keyboard, the line they run themselves is the better default —
-their terminal shows the tree live and outlives any session.
+The process belongs to the session that launched it. If that session dies,
+Preflight may find a ticket at `implementing` and refuse the next run. A terminal
+the user owns can outlive the agent session; give them the line above when they
+ask to launch it themselves.
 
 Offer `-DryRun` (prints the tree, the session it would use and the first command;
 touches nothing) the first time a repo runs the loop, and `-SelfCheck` if the

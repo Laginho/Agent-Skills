@@ -169,8 +169,9 @@ Three guards:
 
 - **`to-implement` with an unmerged branch is a stale read.** You skipped the
   branch check above. Check the branch out and dispatch again.
-- **Wrong model, no work.** If the bindings assign that stage to a model you are
-  not, say which stage the ticket wants and which model owns it, then stop.
+- **Wrong model, no work.** Read the binding for your runtime: `Models:` or
+  `Models (Claude):` in Claude Code, `Models (Codex):` in Codex. If it assigns
+  the stage to a different model, say which model owns it and stop.
 - **Reopened tickets look new.** `Stage: to-implement` on a ticket that carries a
   stage-3 review section means only the ❌ items are left, and the work continues
   on the existing branch. Read the ticket to the bottom before starting.
@@ -247,8 +248,9 @@ Merge depends on the loop's base:
 
 ## Unattended runs
 
-The `sweatshop` skill's driver feeds bare ids to `claude -p`, one at a time, and
-reads `Stage:` back. It adds no instructions of its own: everything a session
+The `sweatshop` skill's driver feeds bare ids to fresh Claude Code or Codex CLI
+sessions, one at a time, and reads `Stage:` back. It adds no instructions of its
+own: everything a session
 does, it does because this file says so. Nobody is watching, so a session owes it
 three things:
 
@@ -280,9 +282,11 @@ work. Do not copy this skill into the repo — one copy of the standard is the p
 
     - Gate: `<command that runs typecheck + lint + tests>`
     - Base branch: `<name>`
-    - Models: stage 1 <model>, stage 2 <model> [effort], stage 3 <model> [effort]
+    - Models: stage 1 <claude model>, stage 2 <claude model> [effort], stage 3 <claude model> [effort]
+    - Models (Codex): stage 1 <codex model>, stage 2 <codex model> [effort], stage 3 <codex model> [effort]
 
-O `[effort]` é opcional (`low|medium|high|max`) e só o driver lê; sem ele, `high`.
+`Models:` é o formato existente para Claude; `Models (Claude):` também serve.
+Inclua só os runtimes usados pelo repo. O `[effort]` é opcional; sem ele, `high`.
 
 Tracker paths and ticket shape do **not** go in this block. They are already in
 `docs/agents/issue-tracker.md`.

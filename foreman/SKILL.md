@@ -19,10 +19,12 @@ ticket, a dirty tree, a ticket at `implementing` or `reviewing`, or `blocked`
 tickets waiting on the human and nothing else runnable. The driver's Preflight
 would refuse the same things; you refuse them with the tree in view.
 
-Otherwise launch the driver as a **background task** of this session (the Bash
-tool's `run_in_background`; the sweatshop skill's line, unchanged). Note the
+Otherwise launch the runtime's driver as a **background task** of this session
+(Claude Code's Bash background mode or a Codex terminal session; use the script
+selected by `sweatshop`). Note the
 launch time and the last row of `<tracker>/run-log.md`: everything after that row
-is this run. Then start `/loop 30m` on the check-in below.
+is this run. In Claude Code, start `/loop 30m`; in Codex, use a 30-minute thread
+heartbeat for the check-in below.
 
 ## 2. Check-in (every 30 minutes)
 
@@ -69,7 +71,7 @@ in the summary, not a commit. Subagents: none; you read files and run the driver
 
 ## 5. Summary (when the task ends)
 
-Stop the loop. One message in chat, then push-notify. Three blocks:
+Stop the check-ins. One message in chat, then notify. Three blocks:
 
 - **Produced** — the session PR's body, in its order: `Needs your call` and
   `Review: human` first, `Approve` lines after. Link the PR.
