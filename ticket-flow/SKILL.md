@@ -171,7 +171,9 @@ Three guards:
   branch check above. Check the branch out and dispatch again.
 - **Wrong model, no work.** Read the binding for your runtime: `Models:` or
   `Models (Claude):` in Claude Code, `Models (Codex):` in Codex. If it assigns
-  the stage to a different model, say which model owns it and stop.
+  the stage to a different model, say which model owns it and stop. Codex does
+  not tell a session its model name: there, trust the `--model` you were
+  launched with and stop only when you know you are a different model.
 - **Reopened tickets look new.** `Stage: to-implement` on a ticket that carries a
   stage-3 review section means only the ❌ items are left, and the work continues
   on the existing branch. Read the ticket to the bottom before starting.
