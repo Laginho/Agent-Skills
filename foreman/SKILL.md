@@ -90,14 +90,43 @@ the one restart of section 3.
 
 ## 5. Summary (when the task ends)
 
-Stop the check-ins. One message in chat, then notify. Three blocks:
+Stop the check-ins. When the run owes a report (section 6), write it first. One
+message in chat, then notify. Three blocks:
 
 - **Produced** — the session PR's body, in its order: `Needs your call` and
   `Review: human` first, `Approve` lines after. Link the PR. End with the run's
   cost: the `Cost` column summed over this run's rows, per model, with `?` rows
   counted apart. It is API list price, not what the plan charged.
+  Link the report's PDF when there is one.
 - **Foreman** — restarts, cleanups, every `Proxy decided` line, anything you
   noticed and left alone.
 - **Your turn** — one line per action only the human can take: this ticket
   needs your decision (quote the question from `## Comments`), this PR needs your
   review, this stage is stuck and I did not touch it.
+
+## 6. Report (runs of three or more tickets)
+
+A run whose rows in `run-log.md` (the ones since launch, relaunches included)
+name three or more distinct ids owes a PDF report. The chat summary scrolls
+away; the report is what the human reads before the next run and compares
+across runs. Fewer than three: the summary is enough.
+
+- **Where:** `docs/relatorios/<yyyy-mm-dd>-sweatshop-<runtime>[-N].tex` and its
+  `.pdf`, both committed on the session branch and pushed, so they land in the
+  session PR. `-N` when that day already has one.
+- **Build:** any LaTeX engine on the machine. None on the PATH: Codex bundles
+  Tectonic at `~/.codex/.tmp/bundled-marketplaces/openai-bundled/plugins/latex/bin/tectonic.exe`
+  (`tectonic -X compile <file>.tex`). Recompile until there are no overfull-box
+  warnings. No engine anywhere: commit the `.tex`, and say so in the summary.
+- **Shape:** the newest report in `docs/relatorios/` is the template; keep its
+  sections so runs compare side by side. Without one: summary (produced, cost,
+  the one thing that went wrong, provisional verdict), timeline, per-stage table
+  (minutes, tokens, cache, output, cost, outcome) with a chart of where the input
+  went and what was wasted, comparison with the previous runs from `run-log.md`,
+  observations per model, driver and runtime issues, numbered recommendations,
+  and every `Débito humano:` line of the run.
+- **Numbers come from the logs, never from memory:** `run-log.md` rows, the
+  stages' `.txt` (Codex: `turn.completed` usage), `git log` of the session. A
+  count you did not recompute from them does not go in. When a row's outcome
+  lies (the driver read a stale copy), say so and report what really happened.
+
