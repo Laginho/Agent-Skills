@@ -52,13 +52,20 @@ meets it in the PR, and a conflict there is the human's call.
 ## What the driver writes
 
 - `<tracker>/run-log.md`: one row per **stage run** — when, id, stage, model,
-  attempt, outcome, session, minutes. One row per ticket would collapse stage 2
+  attempt, outcome, session, minutes, tokens, cost. One row per ticket would collapse stage 2
   and stage 3 into one duration and drop the model, the two axes worth
   correlating later ("tickets shaped like X cost sonnet three attempts").
   Nothing about the ticket is copied in; the ticket file is in git. The
   aggregate line printed at the end is the trigger to investigate, not the
   investigation.
-- `<tracker>/run-log/<id>-<stage>-<when>.txt`: the session's full output.
+- **Cost** is USD at API list price, the one measure both runtimes give; no
+  subscription bills it, it is what to hold against the plan's price. Claude
+  prices its own session (`total_cost_usd`, subagents included). Codex reports
+  tokens only; the driver prices them from `$CodexPrices` in the script, at
+  short-context rates, so a long-context stage reads low. A model missing from
+  that table logs `?`, never a guess: add its row from OpenAI's pricing page.
+- `<tracker>/run-log/<id>-<stage>-<when>.txt`: the session's full output (for
+  Claude, its JSON result). `.final` beside it holds the session's last message.
 - Under `## Comments` of a ticket, committed on the session: `Attempt N failed:
   <reason>` after a stage 2 that did not reach `to-review`; `Stage: blocked`
   after the second, or at once when the session ended on a question or committed `blocked` itself (its whole last message is kept). An API

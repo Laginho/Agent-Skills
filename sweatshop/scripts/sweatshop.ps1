@@ -206,7 +206,8 @@ function NextTicket {
 function RunStage($t, $model, $effort, $minutes, $label) {
   $log = Join-Path $RunDir ("{0}-{1}-{2}.txt" -f $t.Id, $label, (Get-Date -Format yyyyMMdd-HHmmss))
   $cliArgs = if ($Runtime -eq 'Claude') {
-    "-p `"$($t.Id)`" --model $model --effort $effort --permission-mode acceptEdits --allowedTools $Allowed"
+    # JSON for the usage; its `result` goes to `.final`, the same place Codex puts its last message.
+    "-p `"$($t.Id)`" --model $model --effort $effort --output-format json --permission-mode acceptEdits --allowedTools $Allowed"
   } else {
     # Unsandboxed: measured 2026-09-24, the Windows workspace-write sandbox keeps
     # .git read-only and cannot reach the keyring, so no commit, push or gh.
@@ -215,7 +216,7 @@ function RunStage($t, $model, $effort, $minutes, $label) {
   }
   Say "$($t.Id) $label ($model $effort, ${minutes}m) -> $log"
   if ($DryRun) { Say "$AgentExe $cliArgs"; return 'dry-run' }
-  $script:LastLog = $log
+  $script:LastLog = $log; $script:LastUsage = $null
   $p = Start-Process $AgentExe -ArgumentList $cliArgs -WorkingDirectory $Repo -NoNewWindow -PassThru `
         -RedirectStandardOutput $log -RedirectStandardError "$log.err"
   $null = $p.Handle   # PS 5.1: without touching Handle, ExitCode reads back as null
@@ -226,7 +227,12 @@ function RunStage($t, $model, $effort, $minutes, $label) {
   # A session that dies before doing anything (auth, bad flags) is our problem,
   # not the ticket's: stop the run instead of blaming the ticket and retrying.
   # Measured 2026-09-14: a dropped internet connection prints only `Execution error`.
-  if ($p.ExitCode -ne 0 -and ($Runtime -eq 'Codex' -or (Get-Item $log).Length -lt 300)) {
+  $j = $null
+  if ($Runtime -eq 'Claude') {
+    try { $j = [IO.File]::ReadAllText($log) | ConvertFrom-Json; [IO.File]::WriteAllText("$log.final", "$($j.result)") } catch { }
+  }
+  $script:LastUsage = Usage $log $model
+  if ($p.ExitCode -ne 0 -and ($Runtime -eq 'Codex' -or -not $j -or $j.num_turns -le 1)) {
     Add-Content $log "`nAPI Error: $Runtime exited $($p.ExitCode)`n$(Get-Content "$log.err" -Raw)"
   }
   $code = $p.ExitCode; $p.Dispose()
@@ -235,7 +241,7 @@ function RunStage($t, $model, $effort, $minutes, $label) {
 
 # The session's last words, one line: when stage 2 stops to ask, this is the question.
 function LogTail($log, $chars = 1200) {
-  $source = if ($Runtime -eq 'Codex' -and (Test-Path "$log.final") -and (Get-Item "$log.final").Length) { "$log.final" } else { $log }
+  $source = if ((Test-Path "$log.final") -and (Get-Item "$log.final").Length) { "$log.final" } else { $log }
   $text = [IO.File]::ReadAllText($source)   # not Get-Content: works while the redirect handle is still open
   if ($text.Length -gt $chars) { $text = '...' + $text.Substring($text.Length - $chars) }
   ($text -replace '\r?\n', ' / ').Trim()
@@ -247,9 +253,53 @@ function LogTail($log, $chars = 1200) {
 function Verdict($log) {
   $text = [IO.File]::ReadAllText($log).TrimEnd()
   if ($text -match '(?m)^API Error') { return 'api-error' }
-  if ($Runtime -eq 'Codex' -and (Test-Path "$log.final")) { $text = [IO.File]::ReadAllText("$log.final").TrimEnd() }
+  # Claude's outage lands in its JSON `result`, which RunStage copied to `.final`.
+  if (Test-Path "$log.final") { $text = [IO.File]::ReadAllText("$log.final").TrimEnd() }
+  if ($text -match '^API Error') { return 'api-error' }
   if ($text -match '\?\W*$') { return 'asked' }
   'failed'
+}
+
+# What a stage consumed, priced at API list price: the one measure both runtimes can
+# give. No subscription bills it; it is the number to hold against the plan's price.
+# Claude prices its own sessions (`total_cost_usd`); Codex reports only tokens.
+# Per 1M tokens: input, cached input, cache write, output. developers.openai.com/api/docs/pricing, read 2026-09-24.
+# ponytail: short-context prices; Codex gives one total per turn, so a stage past the
+# long-context threshold reads low. Split it if the log ever reports per request.
+$CodexPrices = @{
+  'gpt-6-astra' = 10.00, 1.00, 12.50, 50.00
+  'gpt-6-sol'   = 2.00, 0.20, 2.50, 10.00
+  'gpt-6-luna'  = 0.10, 0.01, 0.125, 0.50
+}
+# Not Measure-Object: a field an older CLI does not emit is an error there, a 0 here.
+function Sum($objs, $name) { $s = 0.0; foreach ($o in $objs) { $s += [double]$o.$name }; $s }
+function Usage($log, $model) {
+  $text = [IO.File]::ReadAllText($log)
+  if ($Runtime -eq 'Claude') {
+    try { $j = $text | ConvertFrom-Json } catch { return $null }
+    $m = @($j.modelUsage.PSObject.Properties | ForEach-Object Value)   # every model, subagents included
+    $cached = Sum $m 'cacheReadInputTokens'
+    return [pscustomobject]@{ In = $cached + (Sum $m 'inputTokens') + (Sum $m 'cacheCreationInputTokens')
+                              Cached = $cached; Out = Sum $m 'outputTokens'; Cost = $j.total_cost_usd }
+  }
+  $u = @(foreach ($l in $text -split "`n") {
+    if ($l -like '*turn.completed*') { try { $e = $l | ConvertFrom-Json; if ($e.type -eq 'turn.completed') { $e.usage } } catch { } }
+  })
+  if (-not $u) { return $null }
+  # OpenAI counts cached and cache-write tokens inside input_tokens; reasoning inside output_tokens.
+  $in = Sum $u 'input_tokens'; $cached = Sum $u 'cached_input_tokens'; $write = Sum $u 'cache_write_input_tokens'; $out = Sum $u 'output_tokens'
+  $p = $CodexPrices[$model]
+  $cost = if ($p) { (($in - $cached - $write) * $p[0] + $cached * $p[1] + $write * $p[2] + $out * $p[3]) / 1e6 }
+  [pscustomobject]@{ In = $in; Cached = $cached; Out = $out; Cost = $cost }
+}
+# Invariant: a pt-BR machine writes `$1,23`, and the summary could not add it back up.
+function Inv($f) { [string]::Format([Globalization.CultureInfo]::InvariantCulture, $f, [object[]]$args) }
+function Tok($n) { if ($n -ge 1e6) { Inv '{0:0.0}M' ($n / 1e6) } else { Inv '{0:0}k' ($n / 1e3) } }
+# The two run-log cells; `?` where the stage left no usage (timeout) or the model has no price.
+function UsageCells($u) {
+  if (-not $u) { return '?', '?' }
+  $pct = if ($u.In) { [int](100 * $u.Cached / $u.In) } else { 0 }
+  ('{0} in ({1}% cached), {2} out' -f (Tok $u.In), $pct, (Tok $u.Out)), $(if ($null -ne $u.Cost) { Inv '${0:0.000}' $u.Cost } else { '?' })
 }
 # Two outages in a row is the network, not luck: stop instead of looping on it.
 function NetFail($tail) { if (++$script:NetFails -ge 2) { throw "API unreachable twice; stopping. Last: $tail" } }
@@ -281,12 +331,14 @@ function Note($t, $line, $stage) {
 }
 
 # One row per stage, not per ticket: the model and the time it burned are the two
-# axes worth correlating later, and a per-ticket row cannot hold either.
+# axes worth correlating later, and a per-ticket row cannot hold either. Usage is the
+# stage RunStage just ran.
 function LogStage($t, $stage, $model, $attempt, $outcome, $started) {
   $mins = [int]((Get-Date) - $started).TotalMinutes
-  Add-Content -Encoding UTF8 $RunLog ('| {0} | {1} | {2} | {3} | {4} | {5} | {6} | {7}m |' -f `
-    (Get-Date -Format 'yyyy-MM-dd HH:mm'), $t.Id, $stage, $model, $attempt, $outcome, $Loop, $mins)
-  Say "$($t.Id) $stage ($model): $outcome"
+  $tokens, $cost = UsageCells $script:LastUsage
+  Add-Content -Encoding UTF8 $RunLog ('| {0} | {1} | {2} | {3} | {4} | {5} | {6} | {7}m | {8} | {9} |' -f `
+    (Get-Date -Format 'yyyy-MM-dd HH:mm'), $t.Id, $stage, $model, $attempt, $outcome, $Loop, $mins, $tokens, $cost)
+  Say "$($t.Id) $stage ($model): $outcome, $cost"
 }
 
 # --- what is left ------------------------------------------------------------------
@@ -354,15 +406,17 @@ function ShowSummary {
   if (-not (Test-Path $RunLog)) { return }
   $rows = @(foreach ($l in (Get-Content $RunLog -Encoding UTF8)) {
     $c = @($l -split '\|' | ForEach-Object { $_.Trim() })
-    if ($c.Count -eq 10 -and $c[1] -match '^\d{4}-\d\d-\d\d') { , $c }
+    if ($c.Count -in 10, 12 -and $c[1] -match '^\d{4}-\d\d-\d\d') { , $c }   # 12: with Tokens and Cost
   })
   if (-not $rows) { return }
+  $priced = @($rows | Where-Object { $_.Count -eq 12 -and $_[10] -match '^\$' } | ForEach-Object { [double]($_[10] -replace '\$', '') })
   $med = { param($stage)
     $v = @($rows | Where-Object { $_[3] -eq $stage } | ForEach-Object { [int]($_[8] -replace '\D', '') })
     if ($v.Count) { '{0}m' -f (Median $v) } else { 'n/a' } }
   $n = { param($pat) @($rows | Where-Object { $_[6] -match $pat }).Count }
-  Write-Host ("`n{0} stages | {1} merged | {2} reopened | {3} retries | implement {4} ({5}) | review {6} ({7})" -f `
-    $rows.Count, (& $n '^merged$'), (& $n '^reopened$'), (& $n '^failed'), (& $med 'implement'), $Model2, (& $med 'review'), $Model3)
+  Write-Host ("`n{0} stages | {1} merged | {2} reopened | {3} retries | implement {4} ({5}) | review {6} ({7}) | {8} over {9} priced stages" -f `
+    $rows.Count, (& $n '^merged$'), (& $n '^reopened$'), (& $n '^failed'), (& $med 'implement'), $Model2, (& $med 'review'), $Model3,
+    (Inv '${0:0.000}' ([double]($priced | Measure-Object -Sum).Sum)), $priced.Count)
 }
 
 if ($SelfCheck) {
@@ -382,6 +436,23 @@ if ($SelfCheck) {
     [IO.File]::WriteAllText($tmp, $case[0]); $got = Verdict $tmp
     if ($got -ne $case[1]) { throw "Verdict: expected $($case[1]), got $got" }
   }
+  # Claude's outage is inside its JSON; RunStage copies `result` to `.final`.
+  [IO.File]::WriteAllText($tmp, '{"result":"API Error: 529"}'); [IO.File]::WriteAllText("$tmp.final", 'API Error: 529')
+  if ((Verdict $tmp) -ne 'api-error') { throw 'Verdict: Claude outage in .final' }
+  Remove-Item "$tmp.final"
+  # Usage is the report's cost column. Shapes cut from the real logs of 2026-09-24.
+  $wasRuntime = $Runtime; $Runtime = 'Claude'
+  [IO.File]::WriteAllText($tmp, '{"total_cost_usd":0.5,"modelUsage":{"a":{"inputTokens":10,"outputTokens":100,"cacheReadInputTokens":900,"cacheCreationInputTokens":90},"b":{"inputTokens":0,"outputTokens":50,"cacheReadInputTokens":0,"cacheCreationInputTokens":0}}}')
+  $u = Usage $tmp 'x'
+  if ("$($u.In) $($u.Cached) $($u.Out) $($u.Cost)" -ne '1000 900 150 0.5') { throw "Usage: Claude $u" }
+  if ((UsageCells $u)[0] -ne '1k in (90% cached), 0k out') { throw "UsageCells: $((UsageCells $u)[0])" }
+  $Runtime = 'Codex'
+  [IO.File]::WriteAllText($tmp, "{`"type`":`"item.completed`",`"text`":`"turn.completed`"}`n{`"type`":`"turn.completed`",`"usage`":{`"input_tokens`":2000000,`"cached_input_tokens`":1000000,`"output_tokens`":100000,`"reasoning_output_tokens`":60000}}`n")
+  # luna: 1M uncached * 0.10 + 1M cached * 0.01 + 0.1M out * 0.50 = 0.160
+  if ((UsageCells (Usage $tmp 'gpt-6-luna'))[1] -ne '$0.160') { throw "Usage: Codex $((UsageCells (Usage $tmp 'gpt-6-luna'))[1])" }
+  if ((UsageCells (Usage $tmp 'unpriced'))[1] -ne '?') { throw 'Usage: unpriced model must read ?' }
+  $Runtime = $wasRuntime
+  Remove-Item $tmp
   # PrBody's order is what the human reads first: human-review and non-Approve on top.
   $body = PrBody @([pscustomobject]@{ Id = 'A-1'; Review = 'agent'; Verdict = 'Approve' },
                    [pscustomobject]@{ Id = 'A-2'; Review = 'human'; Verdict = 'Approve' },
@@ -417,8 +488,8 @@ Say "session: $session$(if ($DryRun) { ' (dry run: not checked out, tree read of
 if (-not $DryRun) { $Loop = $session }
 ShowTree 'Before this run'
 if (-not $DryRun) { NoneInflight }
-$hdr = '| When | ID | Stage | Model | Attempt | Outcome | Session | Took |'
-$sep = '|---|---|---|---|---|---|---|---|'
+$hdr = '| When | ID | Stage | Model | Attempt | Outcome | Session | Took | Tokens | Cost |'
+$sep = '|---|---|---|---|---|---|---|---|---|---|'
 if (-not (Test-Path $RunLog)) { Set-Content -Encoding UTF8 $RunLog "$hdr`n$sep" }
 elseif (-not (Select-String -Path $RunLog -SimpleMatch $hdr -Quiet)) {
   # Old rows had another shape. Backfilling would invent values that were never

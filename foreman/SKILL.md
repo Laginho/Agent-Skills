@@ -56,7 +56,7 @@ only.
 
 The background task ended and its output ends in a `throw` message, or a
 check-in finds a `.err` file with content and no live `.txt`. Read the tail of
-the stage's `.txt` and `.err`, the task's own output, and `git -C <repo> status`.
+the stage's `.txt`, `.final` and `.err`, the task's own output, and `git -C <repo> status`.
 Say what happened, then push-notify.
 
 The driver's `finally` already restores the tree and returns to the base, so a
@@ -93,7 +93,9 @@ the one restart of section 3.
 Stop the check-ins. One message in chat, then notify. Three blocks:
 
 - **Produced** — the session PR's body, in its order: `Needs your call` and
-  `Review: human` first, `Approve` lines after. Link the PR.
+  `Review: human` first, `Approve` lines after. Link the PR. End with the run's
+  cost: the `Cost` column summed over this run's rows, per model, with `?` rows
+  counted apart. It is API list price, not what the plan charged.
 - **Foreman** — restarts, cleanups, every `Proxy decided` line, anything you
   noticed and left alone.
 - **Your turn** — one line per action only the human can take: this ticket
