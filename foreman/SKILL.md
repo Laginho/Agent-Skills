@@ -127,6 +127,19 @@ across runs. Fewer than three: the summary is enough.
   went and what was wasted, comparison with the previous runs from `run-log.md`,
   observations per model, driver and runtime issues, numbered recommendations,
   and every `Débito humano:` line of the run.
+- **Scoreboard:** a section with the output of `sweatshop/scripts/scoreboard.ps1`,
+  run over every repo on this machine that has a `<tracker>/run-log.md` (this run's
+  repo and its siblings), pasted as printed. It is cumulative, not this run's alone:
+  it is how the human picks lineups from real tickets instead of a dedicated
+  benchmark. Compare it with the previous report's scoreboard and name the rows that
+  moved. Read it under three rules:
+  - A reopen rate belongs to the implementer → reviewer pair. Compare implementers
+    only under the same reviewer, and reviewers only over the same implementer.
+  - A pair under 10 reviews is an anecdote. Say so next to any conclusion drawn from it.
+  - A row without an effort (`sonnet`, `gpt-6-luna`) predates the effort column.
+    Never fold it into a row that has one.
+
+  A recommendation to change a lineup names the scoreboard rows it rests on.
 - **Numbers come from the logs, never from memory:** `run-log.md` rows, the
   stages' `.txt` (Codex: `turn.completed` usage), `git log` of the session. A
   count you did not recompute from them does not go in. When a row's outcome

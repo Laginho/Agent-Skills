@@ -53,8 +53,8 @@ meets it in the PR, and a conflict there is the human's call.
 
 ## What the driver writes
 
-- `<tracker>/run-log.md`: one row per **stage run** — when, id, stage, model,
-  attempt, outcome, session, minutes, tokens, cost. One row per ticket would collapse stage 2
+- `<tracker>/run-log.md`: one row per **stage run** — when, id, stage, model
+  with its effort (`sonnet-5 xhigh`), attempt, outcome, session, minutes, tokens, cost. One row per ticket would collapse stage 2
   and stage 3 into one duration and drop the model, the two axes worth
   correlating later ("tickets shaped like X cost sonnet three attempts").
   Nothing about the ticket is copied in; the ticket file is in git. The
@@ -74,6 +74,12 @@ meets it in the PR, and a conflict there is the human's call.
   outage spends no attempt; two in a row stop the run.
 
 Both log paths are in `.git/info/exclude`: local, never in a commit.
+
+`scripts/scoreboard.ps1 <repo> [<repo>...]` reads those logs across repos and
+prints two tables: one per implementer (stage runs, failed and asked attempts,
+median minutes, cost), and the reopen rate per implementer → reviewer pair. Each
+review is charged to whoever last sent the ticket to review. It reads files only;
+`-SelfCheck` tests the attribution.
 
 It prints the open tickets as a tree before and after every run, including runs
 it refuses and runs that crash. `/standup` renders the same tree for where things

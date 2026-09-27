@@ -356,7 +356,8 @@ function Note($t, $line, $stage) {
 
 # One row per stage, not per ticket: the model and the time it burned are the two
 # axes worth correlating later, and a per-ticket row cannot hold either. Usage is the
-# stage RunStage just ran.
+# stage RunStage just ran. $model carries its effort (`sonnet-5 xhigh`): the same model
+# at another effort is another row in scoreboard.ps1.
 function LogStage($t, $stage, $model, $attempt, $outcome, $started) {
   $mins = [int]((Get-Date) - $started).TotalMinutes
   $tokens, $cost = UsageCells $script:LastUsage
@@ -549,13 +550,13 @@ while ($t = NextTicket) {
       # and lost its question with the dropped branch. Keep the whole last message.
       if ($t.Stage -eq 'blocked') { $why = 'asked'; $tail = LogTail $script:LastLog 6000 }
       Reset-Tree $t -DropBranch:(-not $hadBranch)
-      if ($why -eq 'api-error') { NetFail $tail; LogStage $t 'implement' $Model2 $attempt 'api error, not counted' $started; continue }
-      if ($why -eq 'asked') { Note $t "Attempt $attempt stopped to ask: $tail" 'blocked'; LogStage $t 'implement' $Model2 $attempt 'asked, blocked' $started; continue }
-      if ($attempt -ge 2) { Note $t "Attempt $attempt failed: $res; blocked after two attempts. Log tail: $tail" 'blocked'; LogStage $t 'implement' $Model2 $attempt "failed ($res), blocked" $started }
-      else { Note $t "Attempt $attempt failed: $res. Log tail: $tail"; LogStage $t 'implement' $Model2 $attempt "failed ($res), will retry" $started }
+      if ($why -eq 'api-error') { NetFail $tail; LogStage $t 'implement' "$Model2 $Effort2"$attempt 'api error, not counted' $started; continue }
+      if ($why -eq 'asked') { Note $t "Attempt $attempt stopped to ask: $tail" 'blocked'; LogStage $t 'implement' "$Model2 $Effort2"$attempt 'asked, blocked' $started; continue }
+      if ($attempt -ge 2) { Note $t "Attempt $attempt failed: $res; blocked after two attempts. Log tail: $tail" 'blocked'; LogStage $t 'implement' "$Model2 $Effort2"$attempt "failed ($res), blocked" $started }
+      else { Note $t "Attempt $attempt failed: $res. Log tail: $tail"; LogStage $t 'implement' "$Model2 $Effort2"$attempt "failed ($res), will retry" $started }
       continue
     }
-    LogStage $t 'implement' $Model2 $attempt 'to-review' $started
+    LogStage $t 'implement' "$Model2 $Effort2"$attempt 'to-review' $started
   }
   $started = Get-Date
   $res = RunStage $t $Model3 $Effort3 $ReviewMinutes 'review'
@@ -565,10 +566,10 @@ while ($t = NextTicket) {
   $t = Ticket (Join-Path $Repo $t.File)
   $names = @{ 'done' = 'merged'; 'to-merge' = 'waiting for you'; 'to-implement' = 'reopened' }
   if (-not $names[$t.Stage] -and (Verdict $script:LastLog) -eq 'api-error') {
-    NetFail (LogTail $script:LastLog); LogStage $t 'review' $Model3 $attempt 'api error, not counted' $started; continue
+    NetFail (LogTail $script:LastLog); LogStage $t 'review' "$Model3 $Effort3"$attempt 'api error, not counted' $started; continue
   }
   $outcome = if ($names[$t.Stage]) { $names[$t.Stage] } else { "review ended at $($t.Stage) ($res)" }
-  LogStage $t 'review' $Model3 $attempt $outcome $started
+  LogStage $t 'review' "$Model3 $Effort3"$attempt $outcome $started
   # A review that stopped short of a verdict (`to-review`, `reviewing`) would be
   # picked again forever or never again: park it for a human.
   if (-not $names[$t.Stage]) { Note $t "Review ended at $($t.Stage) ($res); branch $($t.Branch) holds the review; left for a human" 'blocked' }
