@@ -21,7 +21,9 @@ would refuse the same things; you refuse them with the tree in view.
 
 Otherwise launch the runtime's driver as a **background task** of this session
 (Claude Code's Bash background mode or a Codex terminal session; use the script
-selected by `sweatshop`). Note the
+selected by `sweatshop`). A lineup the human asks for goes on the command line
+(`-Lineup` or `-Models`, as `sweatshop/SKILL.md` says), never into the binding;
+none asked for, run the default. Note the
 launch time and the last row of `<tracker>/run-log.md`: everything after that row
 is this run. In Claude Code, the check-in clock is a background Bash
 `sleep 1800` that you re-arm on every wake: its completion notice always wakes
@@ -111,7 +113,7 @@ name three or more distinct ids owes a PDF report. The chat summary scrolls
 away; the report is what the human reads before the next run and compares
 across runs. Fewer than three: the summary is enough.
 
-- **Where:** `docs/relatorios/<yyyy-mm-dd>-sweatshop-<runtime>[-N].tex` and its
+- **Where:** `docs/relatorios/<yyyy-mm-dd>-sweatshop-<lineup>[-N].tex` and its
   `.pdf`, both committed on the session branch and pushed, so they land in the
   session PR. `-N` when that day already has one.
 - **Build:** any LaTeX engine on the machine. None on the PATH: Codex bundles

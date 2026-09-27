@@ -5,8 +5,10 @@ description: The unattended ticket-flow driver — runs fresh Claude Code or Cod
 
 # Sweatshop
 
-`scripts/sweatshop.ps1 <repo>` runs Claude Code;
-`scripts/sweatshop-codex.ps1 <repo>` runs Codex. Each sends bare ids into a fresh CLI session, one stage at a
+`scripts/sweatshop.ps1 <repo> [-Lineup <name>]` runs the lineup's models: each
+stage on the runtime its model belongs to (`gpt-*` on Codex, the rest on Claude
+Code), so a lineup may pair a Codex implementer with a Claude reviewer.
+`scripts/sweatshop-codex.ps1 <repo>` is `-Lineup Codex`. It sends bare ids into a fresh CLI session, one stage at a
 time, then reads `Stage:` back. **The driver adds
 no instructions of its own.** Everything a session does, it does because
 `ticket-flow/SKILL.md` says so; this file owns only the driver.
@@ -85,13 +87,31 @@ never have to. In Claude Code run `scripts/sweatshop.ps1`; in Codex run
 recursive search from the skills directory if needed. Never select the runtime
 from which CLIs happen to be installed: both can be installed on one machine.
 
-The target repo's `## Bindings do fluxo` block supplies models for each runtime.
-`Models:` remains the Claude line for existing repos; `Models (Claude):` may
-replace it. Codex requires `Models (Codex):`. The driver refuses a missing line
-instead of guessing a model. For example:
+The target repo's `## Bindings do fluxo` block supplies the lineups, one
+`Models` line each. With no `-Lineup` the driver reads `Models (Claude):`, else
+`Models:`; `-Lineup night` reads `Models (night):` and never falls back. The
+driver refuses a missing line instead of guessing a model. Choosing the lineup:
 
-    - Models: stage 1 opus, stage 2 sonnet high, stage 3 opus high
+- The user names a binding line ("the night lineup", "nightshift"): `-Lineup night`.
+- The user spells out models ("luna max implements, opus 5.5 reviews"): pass them
+  for this run only, in the binding's syntax:
+  `-Models 'stage 2 gpt-6-luna max, stage 3 opus-5.5 high'`.
+- Neither: no flag, the default line.
+
+Never edit the binding to run a lineup. The edit dirties the tree Preflight wants
+clean, and it changes the repo's default for every later run. A lineup worth
+keeping goes into the binding by a commit the user asked for.
+
+Claude models carry their version (`opus-5.5`, `sonnet-5`, `fable-5.1`,
+`haiku-4.5`; `opus 5.5` reads the same). An unversioned `opus` is refused: an
+alias moves when a new model ships, and the lineup would change unannounced. For
+example:
+
+    - Models: stage 1 opus-5.5, stage 2 sonnet-5 high, stage 3 opus-5.5 high
     - Models (Codex): stage 1 gpt-6-sol, stage 2 gpt-6-luna high, stage 3 gpt-6-sol high
+    - Models (night): stage 2 gpt-6-luna max, stage 3 opus-5.5 high
+
+A mixed lineup needs both CLIs installed and logged in; the driver checks at start.
 
 Codex stages run with `--dangerously-bypass-approvals-and-sandbox`: on Windows
 its sandbox keeps `.git` read-only and cannot reach the keyring, so a sandboxed
@@ -103,6 +123,8 @@ fluxo` block; otherwise ask which. When asked to run, launch the selected script
 and show where its output lands. These are the corresponding commands:
 
     & "<skills-dir>\sweatshop\scripts\sweatshop.ps1" "<repo>"
+    & "<skills-dir>\sweatshop\scripts\sweatshop.ps1" "<repo>" -Lineup night
+    & "<skills-dir>\sweatshop\scripts\sweatshop.ps1" "<repo>" -Models 'stage 2 gpt-6-luna max, stage 3 opus-5.5 high'
     & "<skills-dir>\sweatshop\scripts\sweatshop-codex.ps1" "<repo>"
 
 Runs on different repos can go in parallel, one session each; a second run on a

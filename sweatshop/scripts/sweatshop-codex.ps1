@@ -10,4 +10,4 @@ param(
   [switch]$DryRun,
   [switch]$SelfCheck
 )
-& (Join-Path $PSScriptRoot 'sweatshop.ps1') @PSBoundParameters -Runtime Codex
+& (Join-Path $PSScriptRoot 'sweatshop.ps1') @PSBoundParameters -Lineup Codex

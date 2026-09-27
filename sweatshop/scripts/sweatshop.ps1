@@ -7,6 +7,7 @@
 
 .EXAMPLE
   .\sweatshop.ps1 D:\Desktop\Projects\SIGAA-ME
+  .\sweatshop.ps1 D:\Desktop\Projects\SIGAA-ME -Lineup night   # the `Models (night):` line
   .\sweatshop.ps1 D:\Desktop\Projects\SIGAA-ME -DryRun     # show what would run
 #>
 param(
@@ -16,7 +17,11 @@ param(
   [int]$ReviewMinutes = 20,
   [switch]$DryRun,
   [switch]$SelfCheck,
-  [ValidateSet('Claude', 'Codex')][string]$Runtime = 'Claude'
+  # The `Models (<name>):` line to run. Absent: `Models (Claude):`, else the legacy `Models:`.
+  [string]$Lineup,
+  # A lineup for this run only, in the binding's own syntax: 'stage 2 gpt-6-luna max, stage 3 opus-5.5 high'.
+  # Never written to the repo: editing the binding would dirty the tree Preflight wants clean.
+  [string]$Models
 )
 $ErrorActionPreference = 'Stop'
 Set-Location $Repo
@@ -53,59 +58,77 @@ elseif (GitOk -C $PSScriptRoot status --porcelain) { Say 'driver: local edits, n
 else { GitOk -C $PSScriptRoot pull -q --ff-only | Out-Null; Say "driver: $(GitOk -C $PSScriptRoot rev-parse --short HEAD)" }
 } finally { $upd.ReleaseMutex(); $upd.Dispose() }
 
-if ($Runtime -eq 'Claude') {
-  # `claude` may not be on PATH: probe the installs the app and the CLI use.
-  $probe = @(
-    "$env:APPDATA\Claude\claude-code\*\claude.exe"
-    "$env:USERPROFILE\AppData\Roaming\Claude\claude-code\*\claude.exe"
-    "$env:USERPROFILE\.local\bin\claude.exe"
-    "$env:APPDATA\npm\claude.cmd"
-  )
-} else {
-  $probe = @(
-    "$env:LOCALAPPDATA\Programs\OpenAI\Codex\bin\codex.exe"
-    "$env:LOCALAPPDATA\OpenAI\Codex\bin\*\codex.exe"
-    "$env:APPDATA\npm\codex.cmd"
-  )
-}
-$AgentExe = (Get-Command $Runtime.ToLower() -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
-if (-not $AgentExe) {
-  $AgentExe = $probe | ForEach-Object { Get-ChildItem $_ -ErrorAction SilentlyContinue } |
-    Sort-Object { try { [version]$_.Directory.Name } catch { [version]"0.0.0" } } |
-    Select-Object -Last 1 -ExpandProperty FullName
-}
-if (-not $AgentExe) { throw "No $Runtime CLI found. Tried PATH and:`n  $($probe -join "`n  ")" }
-Say "${Runtime}: $AgentExe"
-if ($Runtime -eq 'Codex' -and -not ($DryRun -or $SelfCheck)) {
-  $ErrorActionPreference = 'Continue'
-  $null = & $AgentExe login status 2>&1
-  $loginCode = $LASTEXITCODE
-  $ErrorActionPreference = 'Stop'
-  if ($loginCode) { throw 'Codex CLI is not logged in. Run codex login before starting the driver.' }
-}
-
 # --- bindings -----------------------------------------------------------------
 $agents = if (Test-Path AGENTS.md) { 'AGENTS.md' } else { 'CLAUDE.md' }
 $block = (Get-Content $agents -Raw -Encoding UTF8) -split '(?m)^## ' | Where-Object { $_ -like 'Bindings do fluxo*' }
 if (-not $block) { throw "No '## Bindings do fluxo' block in $agents" }
 $Gate   = [regex]::Match($block, 'Gate:\s*`([^`]+)`').Groups[1].Value
 $Base   = [regex]::Match($block, 'Base branch:\s*`([^`]+)`').Groups[1].Value
-# A legacy `Models:` line belongs to Claude. Codex uses an explicit line in the
-# same repo binding, so neither runtime can silently borrow the other's models.
-$models = if ($Runtime -eq 'Codex') {
-  [regex]::Match($block, '(?im)^\s*-\s*Models \(Codex\):\s*(.+)$').Groups[1].Value
-} else {
-  $named = [regex]::Match($block, '(?im)^\s*-\s*Models \(Claude\):\s*(.+)$').Groups[1].Value
-  if ($named) { $named } else { [regex]::Match($block, '(?im)^\s*-\s*Models:\s*(.+)$').Groups[1].Value }
+# The runtime follows the model, stage by stage, so one lineup can pair a Codex
+# implementer with a Claude reviewer.
+# ponytail: a name prefix; give the binding a runtime column if a family ever runs on both.
+function RuntimeOf($model) { if ($model -match '^gpt-') { 'Codex' } else { 'Claude' } }
+# `opus 5.5` and `opus-5.5` both read as `opus-5.5`, the bench's label; effort is
+# optional and defaults to high. Returns model, effort; $null when the stage is absent.
+function StageModel($line, $n) {
+  $m = [regex]::Match("$line", "stage $n (\w[\w.-]*(?: \d+(?:\.\d+)*)?)(?: (low|medium|high|xhigh|max|ultra))?")
+  if (-not $m.Success) { return $null }
+  ($m.Groups[1].Value -replace ' ', '-').ToLower()
+  if ($m.Groups[2].Success) { $m.Groups[2].Value } else { 'high' }
 }
-# Effort is optional: `stage 2 gpt-6-luna high`. Absent, it is high.
-$m2 = [regex]::Match($models, 'stage 2 ([\w.-]+)(?: (low|medium|high|xhigh|max|ultra))?')
-$m3 = [regex]::Match($models, 'stage 3 ([\w.-]+)(?: (low|medium|high|xhigh|max|ultra))?')
-$Model2 = $m2.Groups[1].Value.ToLower()
-$Model3 = $m3.Groups[1].Value.ToLower()
-$Effort2 = if ($m2.Groups[2].Success) { $m2.Groups[2].Value } else { 'high' }
-$Effort3 = if ($m3.Groups[2].Success) { $m3.Groups[2].Value } else { 'high' }
-if (-not ($Gate -and $Base -and $Model2 -and $Model3)) { throw "Bindings block incomplete for $Runtime (Gate, Base branch, Models ($Runtime)):`n$block" }
+# What `claude --model` takes: `opus-5.5` is `claude-opus-5-5`. Codex names pass as written.
+function CliModel($model) { if ($model -match '^(gpt-|claude-)') { $model } else { 'claude-' + ($model -replace '\.', '-') } }
+
+# A lineup is one `Models (<name>):` line. Only the default falls back to the
+# legacy `Models:`; a named lineup that is missing is refused, never borrowed.
+# Not `$models`: PowerShell names are case-blind, and that is the -Models parameter.
+if ($Models -and $Lineup) { throw 'Pass -Lineup or -Models, not both.' }
+$LineupName = if ($Models) { 'ad hoc' } elseif ($Lineup) { $Lineup } else { 'Claude' }
+$line = if ($Models) { $Models } else { [regex]::Match($block, "(?im)^\s*-\s*Models \($([regex]::Escape($LineupName))\):\s*(.+)$").Groups[1].Value }
+if (-not $line -and -not $Lineup -and -not $Models) { $line = [regex]::Match($block, '(?im)^\s*-\s*Models:\s*(.+)$').Groups[1].Value }
+$Model2, $Effort2 = StageModel $line 2
+$Model3, $Effort3 = StageModel $line 3
+if (-not ($Gate -and $Base -and $Model2 -and $Model3)) { throw "Bindings block incomplete for lineup '$LineupName' (Gate, Base branch, stage 2 and 3 models):`n$(if ($Models) { $Models } else { $block })" }
+# An unversioned alias moves when Anthropic ships the next model, and the lineup
+# changes under a run with nobody told. Pin it.
+foreach ($m in $Model2, $Model3) {
+  if ((RuntimeOf $m) -eq 'Claude' -and $m -notmatch '\d') { throw "Claude model '$m' has no version. Write it as opus-5.5, sonnet-5, fable-5.1 or haiku-4.5." }
+}
+
+# --- CLIs -------------------------------------------------------------------------
+function FindCli($runtime) {
+  $probe = if ($runtime -eq 'Claude') {
+    # `claude` may not be on PATH: probe the installs the app and the CLI use.
+    "$env:APPDATA\Claude\claude-code\*\claude.exe"
+    "$env:USERPROFILE\AppData\Roaming\Claude\claude-code\*\claude.exe"
+    "$env:USERPROFILE\.local\bin\claude.exe"
+    "$env:APPDATA\npm\claude.cmd"
+  } else {
+    "$env:LOCALAPPDATA\Programs\OpenAI\Codex\bin\codex.exe"
+    "$env:LOCALAPPDATA\OpenAI\Codex\bin\*\codex.exe"
+    "$env:APPDATA\npm\codex.cmd"
+  }
+  $exe = (Get-Command $runtime.ToLower() -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+  if (-not $exe) {
+    $exe = $probe | ForEach-Object { Get-ChildItem $_ -ErrorAction SilentlyContinue } |
+      Sort-Object { try { [version]$_.Directory.Name } catch { [version]"0.0.0" } } |
+      Select-Object -Last 1 -ExpandProperty FullName
+  }
+  if (-not $exe) { throw "No $runtime CLI found. Tried PATH and:`n  $($probe -join "`n  ")" }
+  $exe
+}
+$Cli = @{}
+foreach ($rt in @((RuntimeOf $Model2), (RuntimeOf $Model3)) | Select-Object -Unique) {
+  $Cli[$rt] = FindCli $rt
+  Say "${rt}: $($Cli[$rt])"
+  if ($rt -eq 'Codex' -and -not ($DryRun -or $SelfCheck)) {
+    $ErrorActionPreference = 'Continue'
+    $null = & $Cli[$rt] login status 2>&1
+    $loginCode = $LASTEXITCODE
+    $ErrorActionPreference = 'Stop'
+    if ($loginCode) { throw 'Codex CLI is not logged in. Run codex login before starting the driver.' }
+  }
+}
 $Loop = $Base   # the loop's base: the session branch once Use-Session picks one
 $GateCmd = ($Gate -split ' ')[0]
 # Prefix form `Bash(x:*)`, not glob `Bash(x *)`: measured 2026-09-12, `Bash(npx *)`
@@ -205,9 +228,10 @@ function NextTicket {
 # --- one fresh CLI session -------------------------------------------------------
 function RunStage($t, $model, $effort, $minutes, $label) {
   $log = Join-Path $RunDir ("{0}-{1}-{2}.txt" -f $t.Id, $label, (Get-Date -Format yyyyMMdd-HHmmss))
-  $cliArgs = if ($Runtime -eq 'Claude') {
+  $rt = RuntimeOf $model; $exe = $Cli[$rt]
+  $cliArgs = if ($rt -eq 'Claude') {
     # JSON for the usage; its `result` goes to `.final`, the same place Codex puts its last message.
-    "-p `"$($t.Id)`" --model $model --effort $effort --output-format json --permission-mode acceptEdits --allowedTools $Allowed"
+    "-p `"$($t.Id)`" --model $(CliModel $model) --effort $effort --output-format json --permission-mode acceptEdits --allowedTools $Allowed"
   } else {
     # Unsandboxed: measured 2026-09-24, the Windows workspace-write sandbox keeps
     # .git read-only and cannot reach the keyring, so no commit, push or gh.
@@ -215,9 +239,9 @@ function RunStage($t, $model, $effort, $minutes, $label) {
     "exec --model $model --config model_reasoning_effort=$effort --dangerously-bypass-approvals-and-sandbox --json --output-last-message `"$log.final`" `"$($t.Id)`""
   }
   Say "$($t.Id) $label ($model $effort, ${minutes}m) -> $log"
-  if ($DryRun) { Say "$AgentExe $cliArgs"; return 'dry-run' }
+  if ($DryRun) { Say "$exe $cliArgs"; return 'dry-run' }
   $script:LastLog = $log; $script:LastUsage = $null
-  $p = Start-Process $AgentExe -ArgumentList $cliArgs -WorkingDirectory $Repo -NoNewWindow -PassThru `
+  $p = Start-Process $exe -ArgumentList $cliArgs -WorkingDirectory $Repo -NoNewWindow -PassThru `
         -RedirectStandardOutput $log -RedirectStandardError "$log.err"
   $null = $p.Handle   # PS 5.1: without touching Handle, ExitCode reads back as null
   if (-not $p.WaitForExit($minutes * 60 * 1000)) {
@@ -228,12 +252,12 @@ function RunStage($t, $model, $effort, $minutes, $label) {
   # not the ticket's: stop the run instead of blaming the ticket and retrying.
   # Measured 2026-09-14: a dropped internet connection prints only `Execution error`.
   $j = $null
-  if ($Runtime -eq 'Claude') {
+  if ($rt -eq 'Claude') {
     try { $j = [IO.File]::ReadAllText($log) | ConvertFrom-Json; [IO.File]::WriteAllText("$log.final", "$($j.result)") } catch { }
   }
   $script:LastUsage = Usage $log $model
-  if ($p.ExitCode -ne 0 -and ($Runtime -eq 'Codex' -or -not $j -or $j.num_turns -le 1)) {
-    Add-Content $log "`nAPI Error: $Runtime exited $($p.ExitCode)`n$(Get-Content "$log.err" -Raw)"
+  if ($p.ExitCode -ne 0 -and ($rt -eq 'Codex' -or -not $j -or $j.num_turns -le 1)) {
+    Add-Content $log "`nAPI Error: $rt exited $($p.ExitCode)`n$(Get-Content "$log.err" -Raw)"
   }
   $code = $p.ExitCode; $p.Dispose()
   return 'exit ' + $(if ($null -eq $code) { '?' } else { $code })
@@ -275,7 +299,7 @@ $CodexPrices = @{
 function Sum($objs, $name) { $s = 0.0; foreach ($o in $objs) { $s += [double]$o.$name }; $s }
 function Usage($log, $model) {
   $text = [IO.File]::ReadAllText($log)
-  if ($Runtime -eq 'Claude') {
+  if ((RuntimeOf $model) -eq 'Claude') {
     try { $j = $text | ConvertFrom-Json } catch { return $null }
     $m = @($j.modelUsage.PSObject.Properties | ForEach-Object Value)   # every model, subagents included
     $cached = Sum $m 'cacheReadInputTokens'
@@ -440,18 +464,27 @@ if ($SelfCheck) {
   [IO.File]::WriteAllText($tmp, '{"result":"API Error: 529"}'); [IO.File]::WriteAllText("$tmp.final", 'API Error: 529')
   if ((Verdict $tmp) -ne 'api-error') { throw 'Verdict: Claude outage in .final' }
   Remove-Item "$tmp.final"
+  # A mixed lineup routes each stage by its model; a wrong route runs the wrong CLI.
+  foreach ($case in @(@('gpt-6-luna', 'Codex'), @('gpt-6-sol', 'Codex'), @('opus', 'Claude'), @('claude-opus-5-5', 'Claude'), @('sonnet', 'Claude'))) {
+    if ((RuntimeOf $case[0]) -ne $case[1]) { throw "RuntimeOf: $($case[0]) should run on $($case[1])" }
+  }
+  # The binding's spelling, the run log's label and the CLI's id must stay one model.
+  $l = 'stage 1 x, stage 2 Opus 5.5 max, stage 3 gpt-6-luna'
+  if ("$(StageModel $l 2) / $(StageModel $l 3)" -ne 'opus-5.5 max / gpt-6-luna high') { throw "StageModel: $(StageModel $l 2) / $(StageModel $l 3)" }
+  if ("$(StageModel 'stage 2 sonnet-5 low' 2)" -ne 'sonnet-5 low') { throw "StageModel: $(StageModel 'stage 2 sonnet-5 low' 2)" }
+  if ($null -ne (StageModel 'stage 2 opus-5.5' 3)) { throw 'StageModel: an absent stage must be $null' }
+  foreach ($case in @(@('opus-5.5', 'claude-opus-5-5'), @('haiku-4.5', 'claude-haiku-4-5'), @('gpt-6-luna', 'gpt-6-luna'), @('claude-sonnet-5', 'claude-sonnet-5'))) {
+    if ((CliModel $case[0]) -ne $case[1]) { throw "CliModel: $($case[0]) gave $(CliModel $case[0])" }
+  }
   # Usage is the report's cost column. Shapes cut from the real logs of 2026-09-24.
-  $wasRuntime = $Runtime; $Runtime = 'Claude'
   [IO.File]::WriteAllText($tmp, '{"total_cost_usd":0.5,"modelUsage":{"a":{"inputTokens":10,"outputTokens":100,"cacheReadInputTokens":900,"cacheCreationInputTokens":90},"b":{"inputTokens":0,"outputTokens":50,"cacheReadInputTokens":0,"cacheCreationInputTokens":0}}}')
   $u = Usage $tmp 'x'
   if ("$($u.In) $($u.Cached) $($u.Out) $($u.Cost)" -ne '1000 900 150 0.5') { throw "Usage: Claude $u" }
   if ((UsageCells $u)[0] -ne '1k in (90% cached), 0k out') { throw "UsageCells: $((UsageCells $u)[0])" }
-  $Runtime = 'Codex'
   [IO.File]::WriteAllText($tmp, "{`"type`":`"item.completed`",`"text`":`"turn.completed`"}`n{`"type`":`"turn.completed`",`"usage`":{`"input_tokens`":2000000,`"cached_input_tokens`":1000000,`"output_tokens`":100000,`"reasoning_output_tokens`":60000}}`n")
   # luna: 1M uncached * 0.10 + 1M cached * 0.01 + 0.1M out * 0.50 = 0.160
   if ((UsageCells (Usage $tmp 'gpt-6-luna'))[1] -ne '$0.160') { throw "Usage: Codex $((UsageCells (Usage $tmp 'gpt-6-luna'))[1])" }
-  if ((UsageCells (Usage $tmp 'unpriced'))[1] -ne '?') { throw 'Usage: unpriced model must read ?' }
-  $Runtime = $wasRuntime
+  if ((UsageCells (Usage $tmp 'gpt-unpriced'))[1] -ne '?') { throw 'Usage: unpriced model must read ?' }
   Remove-Item $tmp
   # PrBody's order is what the human reads first: human-review and non-Approve on top.
   $body = PrBody @([pscustomobject]@{ Id = 'A-1'; Review = 'agent'; Verdict = 'Approve' },
@@ -496,7 +529,7 @@ elseif (-not (Select-String -Path $RunLog -SimpleMatch $hdr -Quiet)) {
   # measured: leave them, start a second table.
   Add-Content -Encoding UTF8 $RunLog "`n### Schema change`n`n$hdr`n$sep"
 }
-Say "Gate '$Gate', base '$Base', stage 2 $Model2 $Effort2, stage 3 $Model3 $Effort3"
+Say "Gate '$Gate', base '$Base', lineup '$LineupName': stage 2 $Model2 $Effort2 ($(RuntimeOf $Model2)), stage 3 $Model3 $Effort3 ($(RuntimeOf $Model3))"
 
 try {
 while ($t = NextTicket) {

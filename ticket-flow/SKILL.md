@@ -169,9 +169,12 @@ Three guards:
 
 - **`to-implement` with an unmerged branch is a stale read.** You skipped the
   branch check above. Check the branch out and dispatch again.
-- **Wrong model, no work.** Read the binding for your runtime: `Models:` or
-  `Models (Claude):` in Claude Code, `Models (Codex):` in Codex. If it assigns
-  the stage to a different model, say which model owns it and stop. Codex does
+- **Wrong model, no work.** Inside a session branch (below), skip this guard:
+  the driver picked your model, maybe from a lineup given only on its command
+  line. Otherwise read every `Models` line of the binding (`Models:`,
+  `Models (<lineup>):`). Each line is a lineup, and one lineup can mix runtimes,
+  so do not look only at the line named for yours. If no line gives this stage
+  to your model, say which models do and stop. Codex does
   not tell a session its model name: there, trust the `--model` you were
   launched with and stop only when you know you are a different model.
 - **Reopened tickets look new.** `Stage: to-implement` on a ticket that carries a
@@ -331,11 +334,16 @@ work. Do not copy this skill into the repo — one copy of the standard is the p
 
     - Gate: `<command that runs typecheck + lint + tests>`
     - Base branch: `<name>`
-    - Models: stage 1 <claude model>, stage 2 <claude model> [effort], stage 3 <claude model> [effort]
-    - Models (Codex): stage 1 <codex model>, stage 2 <codex model> [effort], stage 3 <codex model> [effort]
+    - Models: stage 1 <model>, stage 2 <model> [effort], stage 3 <model> [effort]
+    - Models (<lineup>): stage 2 <model> [effort], stage 3 <model> [effort]
 
-`Models:` é o formato existente para Claude; `Models (Claude):` também serve.
-Inclua só os runtimes usados pelo repo. O `[effort]` é opcional; sem ele, `high`.
+Cada linha `Models` é uma lineup. `Models:` (ou `Models (Claude):`) é a padrão do
+driver; `Models (<nome>):` é escolhida com `-Lineup <nome>`, e `Models (Codex):` é
+a do `sweatshop-codex.ps1`. O runtime segue o modelo, estágio por estágio (`gpt-*`
+roda no Codex, o resto no Claude Code), então uma lineup pode misturar os dois.
+Modelo Claude sempre com versão (`opus-5.5`, `sonnet-5`, `fable-5.1`; `opus 5.5`
+também serve): o driver recusa `opus` sozinho. Inclua só as lineups que o repo
+usa. O `[effort]` é opcional; sem ele, `high`.
 
 Tracker paths and ticket shape do **not** go in this block. They are already in
 `docs/agents/issue-tracker.md`.
