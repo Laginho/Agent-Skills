@@ -293,6 +293,7 @@ function Verdict($log) {
 $CodexPrices = @{
   'gpt-6-astra' = 10.00, 1.00, 12.50, 50.00
   'gpt-6-sol'   = 2.00, 0.20, 2.50, 10.00
+  'gpt-6.1-sol' = 2.00, 0.20, 2.50, 10.00
   'gpt-6-luna'  = 0.10, 0.01, 0.125, 0.50
 }
 # Not Measure-Object: a field an older CLI does not emit is an error there, a 0 here.
