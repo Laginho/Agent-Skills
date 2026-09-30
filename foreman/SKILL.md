@@ -1,6 +1,6 @@
 ---
 name: foreman
-description: Runs a sweatshop run with someone watching — launches the driver as a background task, checks in every 30 minutes, cleans up after a crash, and hands the human a summary at the end. Use when asked to "run the foreman", "supervise the sweatshop", "babysit the loop", or with /foreman.
+description: Runs a sweatshop run with someone watching — launches the driver as a background task, reads each finished stage, sends a heartbeat every 30 minutes, cleans up after a crash, and hands the human a summary at the end. Use when asked to "run the foreman", "supervise the sweatshop", "babysit the loop", or with /foreman.
 ---
 
 # Foreman
@@ -30,14 +30,31 @@ is this run. In Claude Code, the check-in clock is a background Bash
 you. Not `/loop` or a cron job: measured 2026-09-24, one never fired and nobody
 noticed for 30 minutes. In Codex, use a 30-minute thread heartbeat.
 
+**Keep notes in a file**, `<tracker>/run-log/foreman-notes.md` (excluded with the
+rest of `run-log/`): one timestamped line per launch, stage row, cleanup, proxy
+call and human request, then a `## Pending` list of what the run still owes. A
+run outlives the session watching it; measured 2026-09-30, a Claude Code restart
+mid-run lost nothing because the notes held the launches, the pinned refs and
+the owed report. After a restart, read them first and resume from `## Pending`.
+
 Never hold `<tracker>/run-log.md` open. On Windows a `tail -F` on it locks out
 the driver's `Add-Content`, and the driver crashes on its next row. `TaskStop`
 leaves the `tail` orphaned, so the lock outlives the monitor; measured
-2026-09-24, it crashed the driver twice. To watch for trouble, poll the
-driver's own task output every 30 s instead.
+2026-09-24, it crashed the driver twice. To watch, poll the driver's own task
+output every 30 s instead: it prints one line per finished stage
+(`<id> <stage> (<model>): <outcome>, $<cost>`) and every `throw`.
 
-## 2. Check-in (every 30 minutes)
+## 2. Per stage, and the heartbeat
 
+**Each finished stage** is a QA read, not a count. When the driver prints its
+line, open that stage's `.final` (the session's last message) and check it
+against the outcome: a `to-review` whose last message admits a skipped test, a
+merge whose review raised something it then waved through, a `blocked` question
+the proxy can answer (section 4). One line in chat and in the notes file: what
+the stage did and anything that looks wrong. An outcome says the stage ended,
+not that it was right, and the driver has already moved on to the next ticket.
+
+**The 30-minute check-in is a heartbeat**, for the human away from the screen.
 Two sentences in chat, from two sources:
 
 - **Finished**: rows appended to `run-log.md` since launch — id, stage, outcome.
@@ -74,6 +91,9 @@ stuck ticket, not a dirty tree, is what a crash leaves:
 API outage, network, `gh` or `git` transport, machine went to sleep. Any other
 cause — a `throw` from Preflight, a script bug, the same stage failing twice —
 you report and stop; a logic failure restarted is the same failure paid twice.
+A usage limit is not a crash: the driver sleeps until the reset the CLI names
+(`usage limit; waiting until HH:mm`). Only a limit without a time (a dated or
+weekly reset) still stops it.
 
 ## 4. Hands off
 
@@ -84,7 +104,10 @@ a line in the summary, not a commit. Subagents: only the proxy.
 **A `blocked` ticket with no `Proxy escalated` line is not the human's yet.**
 It came from a runtime or a session that did not ask the proxy. Spawn the repo's
 `proxy` agent with the ticket id, the question and the evidence from `## Comments`
-and the stage's `.txt`, and follow `ticket-flow`'s "Asking the proxy": record
+and the stage's `.txt`, plus the branch the driver kept for the attempt
+(`<branch>-asked-<when>`, named in the `Attempt N stopped to ask` line), so the
+answer can say "resume from it" instead of starting over. Follow
+`ticket-flow`'s "Asking the proxy": record
 `Proxy decided` (folded into the body when it changes the contract) and set
 `to-implement`, or record `Proxy escalated`. Commit on the session branch, then
 relaunch the driver once the run is over. A relaunch for proxy answers is not
