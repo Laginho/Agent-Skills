@@ -92,21 +92,83 @@ the one restart of section 3.
 
 ## 5. Summary (when the task ends)
 
-Stop the check-ins. When the run owes a report (section 6), write it first. One
-message in chat, then notify. Three blocks:
+Stop the check-ins. When the run reopened a ticket, attribute it first
+(section 6); when it owes a report (section 7), write and commit that next.
+
+Every run, report or not, commits the run log. The driver keeps
+`<tracker>/run-log.md` out of git on purpose (it resets the tree between
+stages), so that file lives on one disk only, and it is what the scoreboard
+compares models from. Copy it whole to `docs/run-log/run-log.md` and commit the
+copy on the session branch and on the base branch, both pushed, in the same
+commits as the report when there is one. Never un-exclude the original.
+
+One message in
+chat, then notify. Three blocks:
 
 - **Produced** — the session PR's body, in its order: `Needs your call` and
   `Review: human` first, `Approve` lines after. Link the PR. End with the run's
   cost: the `Cost` column summed over this run's rows, per model, with `?` rows
   counted apart. It is API list price, not what the plan charged.
-  Link the report's PDF when there is one.
+  Link the report's PDF when there is one, with its two commits (section 7,
+  **Record**).
 - **Foreman** — restarts, cleanups, every `Proxy decided` line, anything you
   noticed and left alone.
 - **Your turn** — one line per action only the human can take: this ticket
   needs your decision (quote the question from `## Comments`), this PR needs your
   review, this stage is stuck and I did not touch it.
 
-## 6. Report (runs of three or more tickets)
+## 6. Reopen attribution (every run with a reopen)
+
+A reopen rate says a ticket came back, not whose fault it was. Every `reopened`
+review row of this run gets each of its findings labelled, so the scoreboard can
+charge the implementer only for what was the implementer's.
+
+**Evidence per round:** the review's entry in `## Comments` that sent the ticket
+back, the ticket as it stood when stage 2 ran, and the diff that stage reviewed.
+Rebased branches lie: after a rebase, `git show <rev>^:<ticket>` can show text the
+proxy added later. Rebuild the ticket from the session branch's commits.
+
+**Rubric, one label per finding, first yes wins:**
+
+1. Is the finding real — a defect or a missing proof a careful maintainer would
+   accept? No → `S3-ruído`.
+2. Is it in the ticket — a criterion, the Contract, the tests list, a decision in
+   `## Comments`? Yes → `S2-explícito/código` (the code misses it) or
+   `S2-explícito/teste` (no test fails when the fix is reverted).
+3. Can the ticket plus the codebase get there — failure, cleanup and concurrency
+   paths of the code stage 2 wrote, regressions of its own change, a convention the
+   repo already follows? Yes → `S2-implícito`. No → `S1`.
+
+Tie between S1 and S2: the fix needs a decision → `S1`; it needs only care → S2.
+Append ` ?` to a borderline label. Two things belong to stage 3 whatever the label,
+and go in the report's prose: drip-feeding (a finding visible in an earlier round,
+raised only now) and review-induced churn (a regression born from the previous
+round's own advice).
+
+**Never judge yourself.** When the round's reviewer is the model you run as (an
+unversioned row such as `opus` counts as you if you are any Opus), the round goes to
+GPT-6 Astra at medium effort, read-only, with this rubric and the evidence paths:
+
+    codex exec -C <repo> -m gpt-6-astra -c model_reasoning_effort=medium -c approval_policy='"never"' --sandbox read-only --color never --output-last-message <scratch>/<id>-r<n>.md "<rubric + evidence>"
+
+Its labels go in as returned. You may add a line of disagreement in the report,
+never change the row.
+
+**Record:** append to `<tracker>/reopen-attribution.md` (create it with the header
+when missing), one row per finding, and commit it on the session branch with the
+run's other tracker changes:
+
+    | When | ID | Round | Implementer | Reviewer | Label | Finding | Why |
+    |---|---|---|---|---|---|---|---|
+    | 2026-09-27 | CLEAN-012 | 1 | sonnet | opus | S2-implícito | Filter bypassed by a `userId@` authority | Care, not a decision: the ticket is a trust boundary (d9e5300) |
+
+`Round` is the ticket's Nth `reopened` review row in `run-log.md`, counting from
+the log's first row, not this run's: it is how `scoreboard.ps1` joins the two.
+`Implementer` and `Reviewer` are spelled as that log's `Model` column spells them.
+`When` is the reopen's date. No `|` inside a cell. Rows already in the file stay:
+the file is history, like the log.
+
+## 7. Report (runs of three or more tickets)
 
 A run whose rows in `run-log.md` (the ones since launch, relaunches included)
 name three or more distinct ids owes a PDF report. The chat summary scrolls
@@ -114,8 +176,17 @@ away; the report is what the human reads before the next run and compares
 across runs. Fewer than three: the summary is enough.
 
 - **Where:** `docs/relatorios/<yyyy-mm-dd>-sweatshop-<lineup>[-N].tex` and its
-  `.pdf`, both committed on the session branch and pushed, so they land in the
-  session PR. `-N` when that day already has one.
+  `.pdf`. `-N` when that day already has one.
+- **Record:** a report that is only written is not done; it is done when it is
+  committed. Commit the `.tex` and the `.pdf` on the session branch and push, so
+  they land in the session PR. Then commit the same two files, same path, on the
+  base branch and push it too: the human reads from the base, and a report that
+  lives only on the session branch is invisible until the merge. Only these
+  records (report, run-log copy, `reopen-attribution.md`) go to the base directly; code still goes
+  through the session PR. Identical files on both sides merge clean. Leave the
+  repo on the base branch.
+  The summary names both commits next to the PDF link; no hashes there means the
+  report was not recorded.
 - **Build:** any LaTeX engine on the machine. None on the PATH: Codex bundles
   Tectonic at `~/.codex/.tmp/bundled-marketplaces/openai-bundled/plugins/latex/bin/tectonic.exe`
   (`tectonic -X compile <file>.tex`). Recompile until there are no overfull-box
@@ -127,6 +198,10 @@ across runs. Fewer than three: the summary is enough.
   went and what was wasted, comparison with the previous runs from `run-log.md`,
   observations per model, driver and runtime issues, numbered recommendations,
   and every `Débito humano:` line of the run.
+- **Reopen attribution:** section 6's rows for this run as a table (ticket, round,
+  finding, label, why, and who judged it when it was not you), the totals per label,
+  and the drip-feeding and churn cases. Place it before the scoreboard, since the
+  scoreboard reads them.
 - **Scoreboard:** a section with the output of `sweatshop/scripts/scoreboard.ps1`,
   run over every repo on this machine that has a `<tracker>/run-log.md` (this run's
   repo and its siblings), pasted as printed. It is cumulative, not this run's alone:
@@ -138,6 +213,10 @@ across runs. Fewer than three: the summary is enough.
   - A pair under 10 reviews is an anecdote. Say so next to any conclusion drawn from it.
   - A row without an effort (`sonnet`, `gpt-6-luna`) predates the effort column.
     Never fold it into a row that has one.
+  - Judge an implementer by the `S2 rate`, not the raw reopen rate: a reopen with no
+    S2 finding was the spec's or the reviewer's. While `Unclassified` is above zero
+    the S2 rate is a floor. `S1` counts in the findings table point at stage 1,
+    `S3 noise` at the reviewer.
 
   A recommendation to change a lineup names the scoreboard rows it rests on.
 - **Numbers come from the logs, never from memory:** `run-log.md` rows, the

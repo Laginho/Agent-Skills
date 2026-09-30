@@ -3,6 +3,8 @@
   How often each implementer's work comes back from review, read from sweatshop run
   logs across repos. The reopen rate is reported per implementer -> reviewer pair:
   a stricter reviewer reopens more, so the pair is the unit, not the implementer.
+  Where <tracker>/reopen-attribution.md exists (the foreman writes it), each reopen is
+  also split by fault: only a reopen with a stage-2 finding counts against the implementer.
 
 .EXAMPLE
   .\scoreboard.ps1 D:\Desktop\Projects\SynchroNice D:\Desktop\Projects\SIGAA-ME
@@ -28,10 +30,23 @@ function Rows($file, $repo) {
   }
 }
 
+# One row per finding of a reopen: | When | ID | Round | Implementer | Reviewer | Label | Finding | Why |.
+# Round N is the ticket's Nth `reopened` review row in run-log.md, which is how the two join.
+function Findings($file, $repo) {
+  foreach ($l in (Get-Content $file -Encoding UTF8)) {
+    $c = @($l -split '\|' | ForEach-Object { $_.Trim() })
+    if ($c.Count -ne 10 -or $c[1] -notmatch '^\d{4}-\d\d-\d\d' -or $c[3] -notmatch '^\d+$') { continue }
+    [pscustomobject]@{ Key = "$repo/$($c[2])#$($c[3])"; Pair = "$($c[4]) -> $($c[5])"; Label = $c[6] }
+  }
+}
+
 # A review is charged to whoever sent that ticket to review last. A review that ended
-# without a verdict (`review ended at ...`) charges nobody; the next one does.
-function Score($rows) {
-  $impl = [ordered]@{}; $pair = [ordered]@{}; $waiting = @{}
+# without a verdict (`review ended at ...`) charges nobody; the next one does. A reopen
+# counts against the implementer (S2) when any of its findings is S2; one with findings
+# but no S2 was the spec's or the reviewer's; one with no findings is unclassified.
+function Score($rows, $findings) {
+  $impl = [ordered]@{}; $pair = [ordered]@{}; $waiting = @{}; $round = @{}; $seen = @{}; $s2 = @{}
+  foreach ($f in $findings) { $seen[$f.Key] = 1; if ($f.Label -like 'S2*') { $s2[$f.Key] = 1 } }
   foreach ($r in $rows) {
     if ($r.Stage -eq 'implement') {
       if (-not $impl.Contains($r.Model)) { $impl[$r.Model] = [pscustomobject]@{ Runs = 0; ToReview = 0; Failed = 0; Asked = 0; Min = @(); Cost = 0.0; Priced = 0 } }
@@ -43,16 +58,23 @@ function Score($rows) {
     } elseif ($r.Stage -eq 'review' -and $r.Outcome -in 'merged', 'reopened', 'waiting for you') {
       $by = if ($waiting[$r.Key]) { $waiting[$r.Key] } else { '?' }   # ?: sent to review before this log began
       $k = "$by|$($r.Model)"
-      if (-not $pair.Contains($k)) { $pair[$k] = [pscustomobject]@{ Impl = $by; Rev = $r.Model; Reviews = 0; Reopened = 0 } }
+      if (-not $pair.Contains($k)) { $pair[$k] = [pscustomobject]@{ Impl = $by; Rev = $r.Model; Reviews = 0; Reopened = 0; S2 = 0; Unclassified = 0 } }
       $pair[$k].Reviews++
-      if ($r.Outcome -eq 'reopened') { $pair[$k].Reopened++ }
+      if ($r.Outcome -eq 'reopened') {
+        $pair[$k].Reopened++
+        $round[$r.Key] = 1 + $round[$r.Key]
+        $n = "$($r.Key)#$($round[$r.Key])"
+        if ($s2[$n]) { $pair[$k].S2++ } elseif (-not $seen[$n]) { $pair[$k].Unclassified++ }
+      }
       $waiting.Remove($r.Key)
     }
   }
   $impl, $pair
 }
 
-function Render($impl, $pair) {
+function Count($labels, $re) { @($labels | Where-Object { $_ -match $re }).Count }
+
+function Render($impl, $pair, $findings) {
   '| Implementer | Stage runs | To review | Failed | Asked | Median min to review | Cost |'
   '|---|---|---|---|---|---|---|'
   foreach ($m in $impl.Keys) {
@@ -62,10 +84,23 @@ function Render($impl, $pair) {
     '| {0} | {1} | {2} | {3} | {4} | {5} | {6} |' -f $m, $i.Runs, $i.ToReview, $i.Failed, $i.Asked, $med, $cost
   }
   ''
-  '| Implementer | Reviewer | Reviews | Reopened | Reopen rate |'
-  '|---|---|---|---|---|'
+  # Unclassified reopens may be S2 too, so the S2 rate is a floor while any remain.
+  '| Implementer | Reviewer | Reviews | Reopened | Reopen rate | Reopened for S2 | S2 rate | Unclassified |'
+  '|---|---|---|---|---|---|---|---|'
   foreach ($p in $pair.Values) {
-    '| {0} | {1} | {2} | {3} | {4}% |' -f $p.Impl, $p.Rev, $p.Reviews, $p.Reopened, [int](100 * $p.Reopened / $p.Reviews)
+    $floor = if ($p.Unclassified) { '>=' } else { '' }
+    '| {0} | {1} | {2} | {3} | {4}% | {5} | {6}{7}% | {8} |' -f $p.Impl, $p.Rev, $p.Reviews, $p.Reopened,
+      [int](100 * $p.Reopened / $p.Reviews), $p.S2, $floor, [int](100 * $p.S2 / $p.Reviews), $p.Unclassified
+  }
+  if (-not $findings) { return }
+  # Every attributed finding, including reopens from before run-log.md began: labels, not rates.
+  ''
+  '| Implementer -> Reviewer | Rounds | S2 explicit code | S2 explicit test | S2 implicit | S1 | S3 noise |'
+  '|---|---|---|---|---|---|---|'
+  foreach ($g in ($findings | Group-Object Pair)) {
+    $l = @($g.Group.Label)
+    '| {0} | {1} | {2} | {3} | {4} | {5} | {6} |' -f $g.Name, @($g.Group.Key | Sort-Object -Unique).Count,
+      (Count $l '^S2-expl\S*[/ ]c'), (Count $l '^S2-expl\S*[/ ]t'), (Count $l '^S2-impl'), (Count $l '^S1'), (Count $l '^S3')
   }
 }
 
@@ -84,11 +119,28 @@ if ($SelfCheck) {
     "| 2026-09-27 10:50 | T-2 | implement | b max | 2 | to-review | $s | 9m | ? | ? |",
     "| 2026-09-27 11:00 | T-2 | review | r high | 2 | review ended at blocked (exit 0) | $s | 5m | ? | ? |",
     "| 2026-09-27 11:10 | T-2 | review | r high | 2 | merged | $s | 5m | ? | ? |",
+    "| 2026-09-27 11:15 | T-4 | implement | a high | 1 | to-review | $s | 20m | ? | ? |",
+    "| 2026-09-27 11:16 | T-4 | review | r high | 1 | reopened | $s | 5m | ? | ? |",
+    "| 2026-09-27 11:17 | T-4 | implement | a high | 1 | to-review | $s | 20m | ? | ? |",
+    "| 2026-09-27 11:18 | T-4 | review | r high | 1 | reopened | $s | 5m | ? | ? |",
+    "| 2026-09-27 11:19 | T-4 | implement | a high | 1 | to-review | $s | 20m | ? | ? |",
+    "| 2026-09-27 11:19 | T-4 | review | r high | 1 | merged | $s | 5m | ? | ? |",
     '| 2026-09-27 11:20 | T-3 | review | r high | 1 | reopened | x | 5m |')   # old shape, no Tokens/Cost; sent to review before the log
-  $impl, $pair = Score @(Rows $tmp 'repo')
-  Remove-Item $tmp
-  $got = ($pair.Values | ForEach-Object { '{0}>{1} {2}/{3}' -f $_.Impl, $_.Rev, $_.Reopened, $_.Reviews }) -join ', '
-  if ($got -ne 'a high>r high 1/2, b max>r high 0/1, ?>r high 1/1') { throw "Score pairs: $got" }
+  # Round 1 of T-4 is noise and round 2 is S2: a join that ignored the round would count one S2, not two.
+  $att = Join-Path $env:TEMP "attribution-$PID.md"
+  Set-Content -Encoding UTF8 $att @(
+    '| When | ID | Round | Implementer | Reviewer | Label | Finding | Why |', '|---|---|---|---|---|---|---|---|',
+    '| 2026-09-27 | T-1 | 1 | a high | r high | S2-implicito | x | x |',
+    '| 2026-09-27 | T-1 | 1 | a high | r high | S1 | x | x |',
+    '| 2026-09-27 | T-4 | 1 | a high | r high | S3-ruido | x | x |',
+    '| 2026-09-27 | T-4 | 2 | a high | r high | S2-explicito/teste ? | x | x |')
+  $found = @(Findings $att 'repo')
+  $impl, $pair = Score @(Rows $tmp 'repo') $found
+  Remove-Item $tmp, $att
+  $got = ($pair.Values | ForEach-Object { '{0}>{1} {2}/{3} s2 {4} u{5}' -f $_.Impl, $_.Rev, $_.Reopened, $_.Reviews, $_.S2, $_.Unclassified }) -join ', '
+  if ($got -ne 'a high>r high 3/5 s2 2 u0, b max>r high 0/1 s2 0 u0, ?>r high 1/1 s2 0 u1') { throw "Score pairs: $got" }
+  $table = (Render $impl $pair $found)[-1]
+  if ($table -ne '| a high -> r high | 3 | 0 | 1 | 1 | 1 | 1 |') { throw "Findings table: $table" }
   $b = $impl['b max']
   if ("$($b.Runs) $($b.Failed) $($b.ToReview)" -ne '2 1 1') { throw "Score b: runs/failed/to-review $($b.Runs) $($b.Failed) $($b.ToReview)" }
   if ((Median $impl['a high'].Min) -ne 20 -or $impl['a high'].Priced -ne 1) { throw 'Score a: median or priced' }
@@ -100,5 +152,9 @@ $rows = foreach ($r in $Repos) {
   $f = Join-Path $r "$Tracker/run-log.md"
   if (Test-Path $f) { Rows $f (Split-Path $r -Leaf) } else { Write-Warning "no run log: $f" }
 }
-$impl, $pair = Score @($rows)
-Render $impl $pair
+$findings = foreach ($r in $Repos) {
+  $f = Join-Path $r "$Tracker/reopen-attribution.md"
+  if (Test-Path $f) { Findings $f (Split-Path $r -Leaf) }
+}
+$impl, $pair = Score @($rows) @($findings)
+Render $impl $pair @($findings)
