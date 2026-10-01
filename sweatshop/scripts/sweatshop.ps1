@@ -332,10 +332,15 @@ function NetFail($tail) { if (++$script:NetFails -ge 2) { throw "API unreachable
 # "You've hit your usage limit. ... try again at 1:38 PM." (local time). Two in a row
 # stopped the run and a human had to relaunch after the reset; wait for it instead.
 function LimitReset($log) {
-  $m = [regex]::Match([IO.File]::ReadAllText($log), 'usage limit.*?try again at (\d{1,2}:\d{2}\s?[AP]M)')
+  # Only the tail: a session that read this file or SKILL.md has the phrase earlier in its log.
+  $text = [IO.File]::ReadAllText($log)
+  if ($text.Length -gt 2000) { $text = $text.Substring($text.Length - 2000) }
+  $m = [regex]::Match($text, 'usage limit.*?try again at (\d{1,2}:\d{2}\s?[AP]M)')
   if (-not $m.Success) { return $null }
   $at = [datetime]::ParseExact(($m.Groups[1].Value -replace '\s', ' ' -replace '(\d)([AP])', '$1 $2'), 'h:mm tt', [Globalization.CultureInfo]::InvariantCulture)
-  if ($at -lt (Get-Date)) { $at = $at.AddDays(1) }
+  # A reset a minute ago is today, not tomorrow; one at 11:59 PM read at 00:01 was yesterday.
+  if ($at -lt (Get-Date).AddHours(-1)) { $at = $at.AddDays(1) }
+  elseif ($at -gt (Get-Date).AddHours(23)) { $at = $at.AddDays(-1) }
   $at.AddMinutes(2)
 }
 # ponytail: only the "at h:mm AM" shape waits; a dated reset (weekly limit) still stops the run.
@@ -490,6 +495,11 @@ if ($SelfCheck) {
   if (-not $at -or $at.ToString('HH:mm') -ne '13:40') { throw "LimitReset: got $at" }
   [IO.File]::WriteAllText($tmp, "API Error: Unable to connect to API (ENOTFOUND)`n")
   if ($null -ne (LimitReset $tmp)) { throw 'LimitReset: an outage is not a usage limit' }
+  $ago = (Get-Date).AddMinutes(-1).ToString('h:mm tt', [Globalization.CultureInfo]::InvariantCulture)
+  [IO.File]::WriteAllText($tmp, "usage limit, try again at $ago.`n")
+  if (((LimitReset $tmp) - (Get-Date)).TotalMinutes -gt 2) { throw 'LimitReset: a reset just past is not tomorrow' }
+  [IO.File]::WriteAllText($tmp, "usage limit, try again at 1:38 PM.`n" + ('x' * 3000) + "`nAPI Error: 529`n")
+  if ($null -ne (LimitReset $tmp)) { throw 'LimitReset: a quote early in the log is not this outage' }
   # A mixed lineup routes each stage by its model; a wrong route runs the wrong CLI.
   foreach ($case in @(@('gpt-6-luna', 'Codex'), @('gpt-6-sol', 'Codex'), @('opus', 'Claude'), @('claude-opus-5-5', 'Claude'), @('sonnet', 'Claude'))) {
     if ((RuntimeOf $case[0]) -ne $case[1]) { throw "RuntimeOf: $($case[0]) should run on $($case[1])" }
