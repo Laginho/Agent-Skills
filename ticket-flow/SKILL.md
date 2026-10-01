@@ -85,6 +85,7 @@ for wide refactors and the approval quiz are why it is being called.
     Stage: to-implement
     Blocked by: <the ids that gate this one, or "none">
     Review: agent | human
+    Difficulty: normal | hard
 
     - Primary files:
       - <path the ticket may touch> (<scope, when the whole file is not in play>)
@@ -110,7 +111,7 @@ for wide refactors and the approval quiz are why it is being called.
 
     ## Comments
 
-Five additions, and each earns its place:
+Six additions, and each earns its place:
 
 - **The id.** `<AREA>-<NNN>`, **unique across the whole repo** and **immutable** —
   it is the address every ledger line, commit message and review block cites. The
@@ -137,6 +138,12 @@ Five additions, and each earns its place:
   Stage 1 sets it when writing the ticket — the author decides what they want to
   see, not the reviewer. Inside a session branch (below) nothing is held: `human`
   only puts the ticket at the top of the session PR.
+- **`Difficulty:`.** Which implementer the driver sends: `hard` gets the lineup's
+  `hard` model, `normal` (the default when the line is missing) gets stage 2's.
+  Stage 1 sets `hard` when a first pass is likely to miss: criteria that interact,
+  numerical or concurrent logic, a function many callers lean on. In doubt, write
+  `normal`; the driver escalates any ticket after its second reopen anyway. A
+  ticket that looks harder than `hard` is two tickets: slice it again.
 
 Also per effort directory: `ledger.md`, a `| Data | ID | Commit |` table of closed
 tickets, one line each, written when a ticket reaches `done`.
@@ -257,7 +264,9 @@ never a copy of it.
 
 **Reopening.** A review that knocks down a closed ticket sets
 `Stage: to-implement`, marks which criterion fell (❌ with the reason), removes the
-ledger line, and appends a review block saying what is left.
+ledger line, and appends a review block saying what is left. The block's
+verdict line is `Verdict: Reopen — <what fell>`: the driver counts those lines,
+and the second one sends the next stage 2 to the `hard` implementer.
 
 ## Commits and closing
 
@@ -371,7 +380,7 @@ work. Do not copy this skill into the repo — one copy of the standard is the p
     - Gate: `<command that runs typecheck + lint + tests>`
     - Base branch: `<name>`
     - Models: stage 1 <model>, stage 2 <model> [effort], stage 3 <model> [effort]
-    - Models (<lineup>): stage 2 <model> [effort], stage 3 <model> [effort]
+    - Models (<lineup>): stage 2 <model> [effort], hard <model> [effort], stage 3 <model> [effort]
 
 Cada linha `Models` é uma lineup. `Models:` (ou `Models (Claude):`) é a padrão do
 driver; `Models (<nome>):` é escolhida com `-Lineup <nome>`, e `Models (Codex):` é
@@ -380,6 +389,11 @@ roda no Codex, o resto no Claude Code), então uma lineup pode misturar os dois.
 Modelo Claude sempre com versão (`opus-5.5`, `sonnet-5`, `fable-5.1`; `opus 5.5`
 também serve): o driver recusa `opus` sozinho. Inclua só as lineups que o repo
 usa. O `[effort]` é opcional; sem ele, `high`.
+
+`hard` é o implementador dos tickets `Difficulty: hard` e dos que já reabriram
+duas vezes; sem ele, o stage 2 implementa todos. Só o implementador muda: o
+revisor da lineup tem que bastar para qualquer ticket. O revisor mais caro fica
+para o PR `Review: human` e para as auditorias antes de release.
 
 Tracker paths and ticket shape do **not** go in this block. They are already in
 `docs/agents/issue-tracker.md`.

@@ -28,6 +28,9 @@ no instructions of its own.** Everything a session does, it does because
 4. **Runs tickets** until nothing is runnable: `to-review` first, then any
    `to-implement` whose `Blocked by` are all `done` — `done` on the session, so
    dependents start on top of what they depend on, no human merge in between.
+   Stage 2 runs on the lineup's `hard` model instead of its `stage 2` one when
+   the ticket says `Difficulty: hard` or carries two `Verdict: Reopen` lines;
+   the run log's `Model` column shows which one ran. The reviewer never changes.
 5. **Stops and reports.** Prints the open tree, then pushes the session and
    opens its PR against the base — or updates the body if the PR exists — and
    returns to the base branch.
@@ -119,7 +122,7 @@ Claude models carry their version (`opus-5.5`, `sonnet-5`, `fable-5.1`,
 alias moves when a new model ships, and the lineup would change unannounced. For
 example:
 
-    - Models: stage 1 opus-5.5, stage 2 sonnet-5 high, stage 3 opus-5.5 high
+    - Models: stage 1 opus-5.5, stage 2 sonnet-5 high, hard opus-5.5 high, stage 3 opus-5.5 high
     - Models (Codex): stage 1 gpt-6-sol, stage 2 gpt-6-luna high, stage 3 gpt-6-sol high
     - Models (night): stage 2 gpt-6-luna max, stage 3 opus-5.5 high
 

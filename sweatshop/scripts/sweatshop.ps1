@@ -71,8 +71,10 @@ $Base   = [regex]::Match($block, 'Base branch:\s*`([^`]+)`').Groups[1].Value
 function RuntimeOf($model) { if ($model -match '^gpt-') { 'Codex' } else { 'Claude' } }
 # `opus 5.5` and `opus-5.5` both read as `opus-5.5`, the bench's label; effort is
 # optional and defaults to high. Returns model, effort; $null when the stage is absent.
+# $n is a stage number, or `hard` for the implementer of hard tickets.
 function StageModel($line, $n) {
-  $m = [regex]::Match("$line", "stage $n (\w[\w.-]*(?: \d+(?:\.\d+)*)?)(?: (low|medium|high|xhigh|max|ultra))?")
+  $key = if ("$n" -match '^\d+$') { "stage $n" } else { $n }
+  $m = [regex]::Match("$line", "\b$key (\w[\w.-]*(?: \d+(?:\.\d+)*)?)(?: (low|medium|high|xhigh|max|ultra))?")
   if (-not $m.Success) { return $null }
   ($m.Groups[1].Value -replace ' ', '-').ToLower()
   if ($m.Groups[2].Success) { $m.Groups[2].Value } else { 'high' }
@@ -89,13 +91,15 @@ $line = if ($Models) { $Models } else { [regex]::Match($block, "(?im)^\s*-\s*Mod
 if (-not $line -and -not $Lineup -and -not $Models) { $line = [regex]::Match($block, '(?im)^\s*-\s*Models:\s*(.+)$').Groups[1].Value }
 $Model2, $Effort2 = StageModel $line 2
 $Model3, $Effort3 = StageModel $line 3
+# Only the implementer changes for a hard ticket: the reviewer has to be good enough for all of them.
+$ModelHard, $EffortHard = StageModel $line 'hard'
 # Measured 2026-10-01: gpt-6.1-sol max took 8-15 min per review, and PHY-48's first
 # review hit the 20-minute ceiling ready to merge; the stage was thrown away.
 if (-not $ReviewMinutes) { $ReviewMinutes = if ($Effort3 -eq 'max') { 40 } else { 20 } }
 if (-not ($Gate -and $Base -and $Model2 -and $Model3)) { throw "Bindings block incomplete for lineup '$LineupName' (Gate, Base branch, stage 2 and 3 models):`n$(if ($Models) { $Models } else { $block })" }
 # An unversioned alias moves when Anthropic ships the next model, and the lineup
 # changes under a run with nobody told. Pin it.
-foreach ($m in $Model2, $Model3) {
+foreach ($m in @($Model2, $Model3, $ModelHard) | Where-Object { $_ }) {
   if ((RuntimeOf $m) -eq 'Claude' -and $m -notmatch '\d') { throw "Claude model '$m' has no version. Write it as opus-5.5, sonnet-5, fable-5.1 or haiku-4.5." }
 }
 
@@ -122,7 +126,7 @@ function FindCli($runtime) {
   $exe
 }
 $Cli = @{}
-foreach ($rt in @((RuntimeOf $Model2), (RuntimeOf $Model3)) | Select-Object -Unique) {
+foreach ($rt in @($Model2, $Model3, $ModelHard) | Where-Object { $_ } | ForEach-Object { RuntimeOf $_ } | Select-Object -Unique) {
   $Cli[$rt] = FindCli $rt
   Say "${rt}: $($Cli[$rt])"
   if ($rt -eq 'Codex' -and -not ($DryRun -or $SelfCheck)) {
@@ -218,7 +222,17 @@ function Ticket($file) {
   $vm = [regex]::Matches($text, '(?m)^Verdict:\s*(.+?)\s*$')
   $verdict = if ($vm.Count) { $vm[$vm.Count - 1].Groups[1].Value }
   [pscustomobject]@{ Id = $id; File = $rel; Branch = $branch; Stage = $stage; BlockedBy = $blocked; LastComment = $last
-                     Review = $(if (Field $text 'Review') { Field $text 'Review' } else { 'agent' }); Verdict = $verdict }
+                     Review = $(if (Field $text 'Review') { Field $text 'Review' } else { 'agent' }); Verdict = $verdict
+                     Difficulty = Field $text 'Difficulty'; Reopens = Reopens $text }
+}
+# Every reopen leaves a `Verdict: Reopen ...` line in the ticket (ticket-flow, Reopening).
+function Reopens($text) { ([regex]::Matches($text, '(?m)^Verdict:\s*Reopen')).Count }
+# Stage 1 marks the tickets it expects to be hard; two reopens show the ones it missed.
+# Measured 2026-09-29: CONT-005 took five passes on gpt-6-luna, then two on sonnet-5.5.
+# No `hard` in the lineup: every ticket runs on stage 2's model.
+function Implementer($t) {
+  if ($ModelHard -and ($t.Difficulty -eq 'hard' -or $t.Reopens -ge 2)) { return $ModelHard, $EffortHard }
+  $Model2, $Effort2
 }
 function AllTickets { Get-ChildItem "$Tracker/*/issues/*.md" | Sort-Object FullName | ForEach-Object { Ticket $_.FullName } | Where-Object Id }
 function NextTicket {
@@ -539,6 +553,16 @@ if ($SelfCheck) {
   if ("$(StageModel $l 2) / $(StageModel $l 3)" -ne 'opus-5.5 max / gpt-6-luna high') { throw "StageModel: $(StageModel $l 2) / $(StageModel $l 3)" }
   if ("$(StageModel 'stage 2 sonnet-5 low' 2)" -ne 'sonnet-5 low') { throw "StageModel: $(StageModel 'stage 2 sonnet-5 low' 2)" }
   if ($null -ne (StageModel 'stage 2 opus-5.5' 3)) { throw 'StageModel: an absent stage must be $null' }
+  # A hard ticket, by its header or by two reopens, gets the `hard` implementer; nothing else does.
+  if ("$(StageModel 'stage 2 gpt-6.1-sol high, hard sonnet-5.5 xhigh, stage 3 gpt-6.1-sol max' 'hard')" -ne 'sonnet-5.5 xhigh') { throw 'StageModel: hard' }
+  $Model2, $Effort2, $ModelHard, $EffortHard = 'easy', 'high', 'strong', 'xhigh'
+  $txt = "# T-1: x`nStage: to-implement`n**Difficulty:** hard`n"
+  $tix = [pscustomobject]@{ Difficulty = Field $txt 'Difficulty'; Reopens = 0 }, [pscustomobject]@{ Difficulty = ''; Reopens = Reopens "Verdict: Reopen (1)`nx`nVerdict: Reopen - 2`nVerdict: Approve`n" },
+         [pscustomobject]@{ Difficulty = 'normal'; Reopens = 1 }
+  $got = ($tix | ForEach-Object { (Implementer $_)[0] }) -join ' '
+  if ($got -ne 'strong strong easy') { throw "Implementer: $got" }
+  $ModelHard = $null
+  if ((Implementer $tix[0])[0] -ne 'easy') { throw 'Implementer: no hard model must fall back to stage 2' }
   foreach ($case in @(@('opus-5.5', 'claude-opus-5-5'), @('haiku-4.5', 'claude-haiku-4-5'), @('gpt-6-luna', 'gpt-6-luna'), @('claude-sonnet-5', 'claude-sonnet-5'))) {
     if ((CliModel $case[0]) -ne $case[1]) { throw "CliModel: $($case[0]) gave $(CliModel $case[0])" }
   }
@@ -595,7 +619,7 @@ elseif (-not (Select-String -Path $RunLog -SimpleMatch $hdr -Quiet)) {
   # measured: leave them, start a second table.
   Add-Content -Encoding UTF8 $RunLog "`n### Schema change`n`n$hdr`n$sep"
 }
-Say "Gate '$Gate', base '$Base', lineup '$LineupName': stage 2 $Model2 $Effort2 ($(RuntimeOf $Model2)), stage 3 $Model3 $Effort3 ($(RuntimeOf $Model3))"
+Say "Gate '$Gate', base '$Base', lineup '$LineupName': stage 2 $Model2 $Effort2 ($(RuntimeOf $Model2)), stage 3 $Model3 $Effort3 ($(RuntimeOf $Model3)), hard $(if ($ModelHard) { "$ModelHard $EffortHard ($(RuntimeOf $ModelHard))" } else { 'none: stage 2 for every ticket' })"
 
 try {
 while (-not (StopAsked) -and ($t = NextTicket)) {
@@ -604,8 +628,11 @@ while (-not (StopAsked) -and ($t = NextTicket)) {
     # A reopened ticket's branch holds the previous pass (tests + code): only a
     # branch this attempt created is safe to drop.
     $hadBranch = [bool](git branch --list $t.Branch)
+    $m2, $e2 = Implementer $t
+    $impl = "$m2 $e2"
+    if ($m2 -ne $Model2) { Say "$($t.Id): hard implementer ($(if ($t.Difficulty -eq 'hard') { 'Difficulty: hard' } else { "$($t.Reopens) reopens" }))" }
     $started = Get-Date
-    $res = RunStage $t $Model2 $Effort2 $ImplementMinutes 'implement'
+    $res = RunStage $t $m2 $e2 $ImplementMinutes 'implement'
     if ($DryRun) { break }
     $t = Ticket (Join-Path $Repo $t.File)
     if ($t.Stage -ne 'to-review') {
@@ -615,7 +642,7 @@ while (-not (StopAsked) -and ($t = NextTicket)) {
       # and lost its question with the dropped branch. Keep the whole last message.
       if ($t.Stage -eq 'blocked') { $why = 'asked'; $tail = LogTail $script:LastLog 6000 }
       Reset-Tree $t -DropBranch:(-not $hadBranch -and $why -ne 'asked')
-      if ($why -eq 'api-error') { LogStage $t 'implement' "$Model2 $Effort2"$attempt 'api error, not counted' $started; ApiDown $tail; continue }
+      if ($why -eq 'api-error') { LogStage $t 'implement' $impl $attempt 'api error, not counted' $started; ApiDown $tail; continue }
       if ($why -eq 'asked') {
         # Keep what the attempt built, under another name. Measured 2026-09-30: four asks
         # lost their diagnosis and mutate-verify tables with the dropped branch, and the
@@ -627,13 +654,13 @@ while (-not (StopAsked) -and ($t = NextTicket)) {
           GitOk branch -q -m $t.Branch $kept | Out-Null
           $kept = " (its commits are on branch ``$kept``)"
         }
-        Note $t "Attempt $attempt stopped to ask$($kept): $tail" 'blocked'; LogStage $t 'implement' "$Model2 $Effort2"$attempt 'asked, blocked' $started; continue
+        Note $t "Attempt $attempt stopped to ask$($kept): $tail" 'blocked'; LogStage $t 'implement' $impl $attempt 'asked, blocked' $started; continue
       }
-      if ($attempt -ge 2) { Note $t "Attempt $attempt failed: $res; blocked after two attempts. Log tail: $tail" 'blocked'; LogStage $t 'implement' "$Model2 $Effort2"$attempt "failed ($res), blocked" $started }
-      else { Note $t "Attempt $attempt failed: $res. Log tail: $tail"; LogStage $t 'implement' "$Model2 $Effort2"$attempt "failed ($res), will retry" $started }
+      if ($attempt -ge 2) { Note $t "Attempt $attempt failed: $res; blocked after two attempts. Log tail: $tail" 'blocked'; LogStage $t 'implement' $impl $attempt "failed ($res), blocked" $started }
+      else { Note $t "Attempt $attempt failed: $res. Log tail: $tail"; LogStage $t 'implement' $impl $attempt "failed ($res), will retry" $started }
       continue
     }
-    LogStage $t 'implement' "$Model2 $Effort2"$attempt 'to-review' $started
+    LogStage $t 'implement' $impl $attempt 'to-review' $started
     if (StopAsked) { break }
   }
   $started = Get-Date
