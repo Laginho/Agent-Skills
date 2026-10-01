@@ -70,8 +70,12 @@ meets it in the PR, and a conflict there is the human's call.
   Claude, its JSON result). `.final` beside it holds the session's last message.
 - Under `## Comments` of a ticket, committed on the session: `Attempt N failed:
   <reason>` after a stage 2 that did not reach `to-review`; `Stage: blocked`
-  after the second, or at once when the session ended on a question or committed `blocked` itself (its whole last message is kept). An API
-  outage spends no attempt; two in a row stop the run.
+  after the second, or at once when the session ended on a question or committed `blocked` itself (its whole last message is kept). A stage
+  that asked keeps its commits: the driver renames its branch to
+  `<branch>-asked-<yyyymmdd-hhmm>` and names it in the note, so the answer can
+  resume from it while the next stage 2 still starts clean. An API outage
+  spends no attempt; two in a row stop the run. A usage limit that names its
+  reset time (`try again at 1:38 PM`) is waited out instead.
 
 Both log paths are in `.git/info/exclude`: local, never in a commit.
 

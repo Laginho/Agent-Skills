@@ -328,6 +328,29 @@ function UsageCells($u) {
 }
 # Two outages in a row is the network, not luck: stop instead of looping on it.
 function NetFail($tail) { if (++$script:NetFails -ge 2) { throw "API unreachable twice; stopping. Last: $tail" } }
+# A usage limit is not an outage: the CLI says when it lifts. Measured 2026-09-30, Codex:
+# "You've hit your usage limit. ... try again at 1:38 PM." (local time). Two in a row
+# stopped the run and a human had to relaunch after the reset; wait for it instead.
+function LimitReset($log) {
+  # Only the tail: a session that read this file or SKILL.md has the phrase earlier in its log.
+  $text = [IO.File]::ReadAllText($log)
+  if ($text.Length -gt 2000) { $text = $text.Substring($text.Length - 2000) }
+  $m = [regex]::Match($text, 'usage limit.*?try again at (\d{1,2}:\d{2}\s?[AP]M)')
+  if (-not $m.Success) { return $null }
+  $at = [datetime]::ParseExact(($m.Groups[1].Value -replace '\s', ' ' -replace '(\d)([AP])', '$1 $2'), 'h:mm tt', [Globalization.CultureInfo]::InvariantCulture)
+  # A reset a minute ago is today, not tomorrow; one at 11:59 PM read at 00:01 was yesterday.
+  if ($at -lt (Get-Date).AddHours(-1)) { $at = $at.AddDays(1) }
+  elseif ($at -gt (Get-Date).AddHours(23)) { $at = $at.AddDays(-1) }
+  $at.AddMinutes(2)
+}
+# ponytail: only the "at h:mm AM" shape waits; a dated reset (weekly limit) still stops the run.
+function ApiDown($tail) {
+  $at = LimitReset $script:LastLog
+  if (-not $at) { NetFail $tail; return }
+  Say "usage limit; waiting until $($at.ToString('HH:mm'))"
+  Start-Sleep -Seconds ([int][math]::Max(0, ($at - (Get-Date)).TotalSeconds))
+  $script:NetFails = 0
+}
 
 # Back to a clean loop base (the session); drop the ticket's branch if asked.
 function Reset-Tree($t, [switch]$DropBranch) {
@@ -466,6 +489,17 @@ if ($SelfCheck) {
   [IO.File]::WriteAllText($tmp, '{"result":"API Error: 529"}'); [IO.File]::WriteAllText("$tmp.final", 'API Error: 529')
   if ((Verdict $tmp) -ne 'api-error') { throw 'Verdict: Claude outage in .final' }
   Remove-Item "$tmp.final"
+  # LimitReset turns a waitable outage into a sleep; the shape is Codex's of 2026-09-30.
+  [IO.File]::WriteAllText($tmp, "{`"type`":`"error`",`"message`":`"You've hit your usage limit. Upgrade to Pro, visit x or try again at 1:38 PM.`"}`n")
+  $at = LimitReset $tmp
+  if (-not $at -or $at.ToString('HH:mm') -ne '13:40') { throw "LimitReset: got $at" }
+  [IO.File]::WriteAllText($tmp, "API Error: Unable to connect to API (ENOTFOUND)`n")
+  if ($null -ne (LimitReset $tmp)) { throw 'LimitReset: an outage is not a usage limit' }
+  $ago = (Get-Date).AddMinutes(-1).ToString('h:mm tt', [Globalization.CultureInfo]::InvariantCulture)
+  [IO.File]::WriteAllText($tmp, "usage limit, try again at $ago.`n")
+  if (((LimitReset $tmp) - (Get-Date)).TotalMinutes -gt 2) { throw 'LimitReset: a reset just past is not tomorrow' }
+  [IO.File]::WriteAllText($tmp, "usage limit, try again at 1:38 PM.`n" + ('x' * 3000) + "`nAPI Error: 529`n")
+  if ($null -ne (LimitReset $tmp)) { throw 'LimitReset: a quote early in the log is not this outage' }
   # A mixed lineup routes each stage by its model; a wrong route runs the wrong CLI.
   foreach ($case in @(@('gpt-6-luna', 'Codex'), @('gpt-6-sol', 'Codex'), @('opus', 'Claude'), @('claude-opus-5-5', 'Claude'), @('sonnet', 'Claude'))) {
     if ((RuntimeOf $case[0]) -ne $case[1]) { throw "RuntimeOf: $($case[0]) should run on $($case[1])" }
@@ -550,9 +584,21 @@ while ($t = NextTicket) {
       # Measured 2026-09-24: PHY-32 ended on prose, read as a failure, burned attempt 2
       # and lost its question with the dropped branch. Keep the whole last message.
       if ($t.Stage -eq 'blocked') { $why = 'asked'; $tail = LogTail $script:LastLog 6000 }
-      Reset-Tree $t -DropBranch:(-not $hadBranch)
-      if ($why -eq 'api-error') { NetFail $tail; LogStage $t 'implement' "$Model2 $Effort2"$attempt 'api error, not counted' $started; continue }
-      if ($why -eq 'asked') { Note $t "Attempt $attempt stopped to ask: $tail" 'blocked'; LogStage $t 'implement' "$Model2 $Effort2"$attempt 'asked, blocked' $started; continue }
+      Reset-Tree $t -DropBranch:(-not $hadBranch -and $why -ne 'asked')
+      if ($why -eq 'api-error') { LogStage $t 'implement' "$Model2 $Effort2"$attempt 'api error, not counted' $started; ApiDown $tail; continue }
+      if ($why -eq 'asked') {
+        # Keep what the attempt built, under another name. Measured 2026-09-30: four asks
+        # lost their diagnosis and mutate-verify tables with the dropped branch, and the
+        # answers said "resume from these commits". Under the ticket's own name, the next
+        # stage 2 would check it out, read its stale `Stage:` and stop.
+        $kept = ''
+        if (-not $hadBranch -and (git branch --list $t.Branch)) {
+          $kept = "$($t.Branch)-asked-$(Get-Date -Format yyyyMMdd-HHmm)"
+          GitOk branch -q -m $t.Branch $kept | Out-Null
+          $kept = " (its commits are on branch ``$kept``)"
+        }
+        Note $t "Attempt $attempt stopped to ask$($kept): $tail" 'blocked'; LogStage $t 'implement' "$Model2 $Effort2"$attempt 'asked, blocked' $started; continue
+      }
       if ($attempt -ge 2) { Note $t "Attempt $attempt failed: $res; blocked after two attempts. Log tail: $tail" 'blocked'; LogStage $t 'implement' "$Model2 $Effort2"$attempt "failed ($res), blocked" $started }
       else { Note $t "Attempt $attempt failed: $res. Log tail: $tail"; LogStage $t 'implement' "$Model2 $Effort2"$attempt "failed ($res), will retry" $started }
       continue
@@ -567,7 +613,7 @@ while ($t = NextTicket) {
   $t = Ticket (Join-Path $Repo $t.File)
   $names = @{ 'done' = 'merged'; 'to-merge' = 'waiting for you'; 'to-implement' = 'reopened' }
   if (-not $names[$t.Stage] -and (Verdict $script:LastLog) -eq 'api-error') {
-    NetFail (LogTail $script:LastLog); LogStage $t 'review' "$Model3 $Effort3"$attempt 'api error, not counted' $started; continue
+    LogStage $t 'review' "$Model3 $Effort3"$attempt 'api error, not counted' $started; ApiDown (LogTail $script:LastLog); continue
   }
   $outcome = if ($names[$t.Stage]) { $names[$t.Stage] } else { "review ended at $($t.Stage) ($res)" }
   LogStage $t 'review' "$Model3 $Effort3"$attempt $outcome $started
