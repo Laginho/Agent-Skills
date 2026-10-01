@@ -23,7 +23,8 @@ Otherwise launch the runtime's driver as a **background task** of this session
 (Claude Code's Bash background mode or a Codex terminal session; use the script
 selected by `sweatshop`). A lineup the human asks for goes on the command line
 (`-Lineup` or `-Models`, as `sweatshop/SKILL.md` says), never into the binding;
-none asked for, run the default. Note the
+none asked for, run the default. A pause the human asks for is the driver's
+`STOP` file (`sweatshop/SKILL.md`), never a kill. Note the
 launch time and the last row of `<tracker>/run-log.md`: everything after that row
 is this run. In Claude Code, the check-in clock is a background Bash
 `sleep 1800` that you re-arm on every wake: its completion notice always wakes
@@ -79,13 +80,18 @@ the stage's `.txt`, `.final` and `.err`, the task's own output, and `git -C <rep
 Say what happened, then push-notify.
 
 The driver's `finally` already restores the tree and returns to the base, so a
-stuck ticket, not a dirty tree, is what a crash leaves:
+stuck ticket, not a dirty tree, is what a crash leaves. A driver killed from
+outside (the session's tasks stopped, the machine off) skips `finally`: copy the
+uncommitted diff into `<tracker>/run-log/`, restore the tree and check out the
+base yourself, then:
 
 - `implementing`: delete the ticket's branch (`<id>` lowercased). The ticket reads
   `to-implement` again from the session; a half-written stage is worthless
   without the session that wrote it, and `ticket-flow` says never continue
   blind.
-- `reviewing`: flip `Stage:` back to `to-review` on the session branch, commit.
+- `reviewing`: flip `Stage:` back to `to-review` on the ticket's branch, where
+  the driver reads it, and on the session branch when the driver parked it there
+  as `blocked` (`Review ended at reviewing (timeout)`); commit both.
 
 **Restart once**, as a background task again, when the cause is environmental:
 API outage, network, `gh` or `git` transport, machine went to sleep. Any other
@@ -210,10 +216,11 @@ across runs. Fewer than three: the summary is enough.
   repo on the base branch.
   The summary names both commits next to the PDF link; no hashes there means the
   report was not recorded.
-- **Build:** any LaTeX engine on the machine. None on the PATH: Codex bundles
-  Tectonic at `~/.codex/.tmp/bundled-marketplaces/openai-bundled/plugins/latex/bin/tectonic.exe`
-  (`tectonic -X compile <file>.tex`). Recompile until there are no overfull-box
-  warnings. No engine anywhere: commit the `.tex`, and say so in the summary.
+- **Build:** any LaTeX engine on the PATH (`tectonic -X compile <file>.tex`).
+  Recompile until there are no overfull-box warnings. None: Codex's bundled
+  Tectonic under `~/.codex/.tmp/`, which a `codex update` can delete (measured
+  2026-10-01). Still none: commit the `.tex`, say so in the summary, and offer to
+  download Tectonic from its GitHub release into a folder on the PATH.
 - **Shape:** the newest report in `docs/relatorios/` is the template; keep its
   sections so runs compare side by side. Without one: summary (produced, cost,
   the one thing that went wrong, provisional verdict), timeline, per-stage table

@@ -14,7 +14,8 @@ param(
   [Parameter(Mandatory)][string]$Repo,
   [string]$Tracker = '.scratch',
   [int]$ImplementMinutes = 45,
-  [int]$ReviewMinutes = 20,
+  # 0: 40 for a `max` reviewer, else 20 (set after the lineup is read).
+  [int]$ReviewMinutes = 0,
   [switch]$DryRun,
   [switch]$SelfCheck,
   # The `Models (<name>):` line to run. Absent: `Models (Claude):`, else the legacy `Models:`.
@@ -88,6 +89,9 @@ $line = if ($Models) { $Models } else { [regex]::Match($block, "(?im)^\s*-\s*Mod
 if (-not $line -and -not $Lineup -and -not $Models) { $line = [regex]::Match($block, '(?im)^\s*-\s*Models:\s*(.+)$').Groups[1].Value }
 $Model2, $Effort2 = StageModel $line 2
 $Model3, $Effort3 = StageModel $line 3
+# Measured 2026-10-01: gpt-6.1-sol max took 8-15 min per review, and PHY-48's first
+# review hit the 20-minute ceiling ready to merge; the stage was thrown away.
+if (-not $ReviewMinutes) { $ReviewMinutes = if ($Effort3 -eq 'max') { 40 } else { 20 } }
 if (-not ($Gate -and $Base -and $Model2 -and $Model3)) { throw "Bindings block incomplete for lineup '$LineupName' (Gate, Base branch, stage 2 and 3 models):`n$(if ($Models) { $Models } else { $block })" }
 # An unversioned alias moves when Anthropic ships the next model, and the lineup
 # changes under a run with nobody told. Pin it.
@@ -343,13 +347,34 @@ function LimitReset($log) {
   elseif ($at -gt (Get-Date).AddHours(23)) { $at = $at.AddDays(-1) }
   $at.AddMinutes(2)
 }
+# A refused request is not an outage: a retry sends the same request and gets the same
+# answer. Measured 2026-10-01: Codex CLI 0.156.1 sent `gpt-6.1-sol` and got 400 "not
+# supported when using Codex with a ChatGPT account"; read as an outage, it took two
+# stages to stop, and `codex update` was the fix.
+function Refused($log) {
+  $text = [IO.File]::ReadAllText($log)
+  if ($text.Length -gt 2000) { $text = $text.Substring($text.Length - 2000) }
+  $m = [regex]::Match($text, 'invalid_request_error\\?"\s*,\s*\\?"message\\?"\s*:\s*\\?"(.+?)\\?"')
+  if ($m.Success) { $m.Groups[1].Value }
+}
 # ponytail: only the "at h:mm AM" shape waits; a dated reset (weekly limit) still stops the run.
 function ApiDown($tail) {
+  $why = Refused $script:LastLog
+  if ($why) { throw "The API refused the request, which is not an outage, so no retry: $why" }
   $at = LimitReset $script:LastLog
   if (-not $at) { NetFail $tail; return }
   Say "usage limit; waiting until $($at.ToString('HH:mm'))"
   Start-Sleep -Seconds ([int][math]::Max(0, ($at - (Get-Date)).TotalSeconds))
   $script:NetFails = 0
+}
+
+# A pause asked from outside: a `STOP` file in the run-log folder ends the run between
+# stages, through the normal finally (tree reset, PR published). Measured 2026-10-01:
+# the only pause was killing the driver mid-stage, twice, with no finally.
+function StopAsked {
+  $f = Join-Path $RunDir 'STOP'
+  if (-not (Test-Path $f)) { return $false }
+  Remove-Item $f; Say 'STOP file found; stopping between stages.'; $script:Stopped = $true; $true
 }
 
 # Back to a clean loop base (the session); drop the ticket's branch if asked.
@@ -500,6 +525,11 @@ if ($SelfCheck) {
   if (((LimitReset $tmp) - (Get-Date)).TotalMinutes -gt 2) { throw 'LimitReset: a reset just past is not tomorrow' }
   [IO.File]::WriteAllText($tmp, "usage limit, try again at 1:38 PM.`n" + ('x' * 3000) + "`nAPI Error: 529`n")
   if ($null -ne (LimitReset $tmp)) { throw 'LimitReset: a quote early in the log is not this outage' }
+  # Refused stops on a 400, never on an outage or a capacity error. Shape: Codex's of 2026-10-01.
+  [IO.File]::WriteAllText($tmp, "{`"type`":`"error`",`"message`":`"{\`"type\`":\`"error\`",\`"status\`":400,\`"error\`":{\`"type\`":\`"invalid_request_error\`",\`"message\`":\`"The 'gpt-6.1-sol' model is not supported.\`"}}`"}`n")
+  if ((Refused $tmp) -ne "The 'gpt-6.1-sol' model is not supported.") { throw "Refused: got $(Refused $tmp)" }
+  [IO.File]::WriteAllText($tmp, "{`"type`":`"error`",`"message`":`"Selected model is at capacity. Please try a different model.`"}`n")
+  if ($null -ne (Refused $tmp)) { throw 'Refused: a capacity error is an outage' }
   # A mixed lineup routes each stage by its model; a wrong route runs the wrong CLI.
   foreach ($case in @(@('gpt-6-luna', 'Codex'), @('gpt-6-sol', 'Codex'), @('opus', 'Claude'), @('claude-opus-5-5', 'Claude'), @('sonnet', 'Claude'))) {
     if ((RuntimeOf $case[0]) -ne $case[1]) { throw "RuntimeOf: $($case[0]) should run on $($case[1])" }
@@ -568,7 +598,7 @@ elseif (-not (Select-String -Path $RunLog -SimpleMatch $hdr -Quiet)) {
 Say "Gate '$Gate', base '$Base', lineup '$LineupName': stage 2 $Model2 $Effort2 ($(RuntimeOf $Model2)), stage 3 $Model3 $Effort3 ($(RuntimeOf $Model3))"
 
 try {
-while ($t = NextTicket) {
+while (-not (StopAsked) -and ($t = NextTicket)) {
   $attempt = 1 + ((Get-Content $t.File -Raw -Encoding UTF8) | Select-String -AllMatches 'Attempt \d+ failed').Matches.Count
   if ($t.Stage -eq 'to-implement') {
     # A reopened ticket's branch holds the previous pass (tests + code): only a
@@ -604,6 +634,7 @@ while ($t = NextTicket) {
       continue
     }
     LogStage $t 'implement' "$Model2 $Effort2"$attempt 'to-review' $started
+    if (StopAsked) { break }
   }
   $started = Get-Date
   $res = RunStage $t $Model3 $Effort3 $ReviewMinutes 'review'
@@ -621,7 +652,7 @@ while ($t = NextTicket) {
   # picked again forever or never again: park it for a human.
   if (-not $names[$t.Stage]) { Note $t "Review ended at $($t.Stage) ($res); branch $($t.Branch) holds the review; left for a human" 'blocked' }
 }
-if (-not $DryRun) { Say 'Nothing runnable. Done.' }
+if (-not $DryRun -and -not $script:Stopped) { Say 'Nothing runnable. Done.' }
 } finally {
   # A run that crashed is when you most want the state, so this lives in finally --
   # after Reset-Tree, or the tree would read tickets off whatever branch it died on.
