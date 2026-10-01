@@ -30,7 +30,7 @@ defined here, in "What this loop adds" below — nowhere else.
 | # | Skill | Delivers | Stops and reports if |
 |---|---|---|---|
 | 1 | `grill-me` → `to-spec` → `to-tickets` | `spec.md` + one ticket file per ticket, `Stage: to-implement` | the human does not approve the seams or the slicing |
-| 2 | `tdd` | branch named for the id, `Stage: implementing`; **a test-only commit, red for the right reason**; then code commits that do not touch tests; gate green; `Stage: to-review` | the ticket needs more than one seam (back to stage 1), or a test proves wrong after being committed (`Stage: blocked` + reason) |
+| 2 | `tdd` | branch named for the id, `Stage: implementing`; **a test-only commit, red for the right reason**; then code commits that do not touch tests; gate green; `Stage: to-review` | the ticket needs more than one seam (back to stage 1), or a committed test proves the *contract* wrong — a criterion that cannot hold, a seam that does not exist (`Stage: blocked` + reason). A test wrong only in its harness is not a stop (below) |
 | 3 | `code-review` (Standards + Spec axes) | small fixes; then either merge, or a PR that waits | a finding is large — reopen the ticket, back to stage 2 |
 
 Stage 1 also registers new ids in the repo's plan document, if it has one, at the
@@ -189,6 +189,24 @@ does not make them pass in the same commit, and stage 2 does not touch test file
 in a code commit. This rule exists because green tests have sat on top of a broken
 parser — the tests were exercising a copy of the logic.
 
+**A committed test wrong in its harness is fixed, not escalated.** Timing, a
+broken helper, a mutant the criteria cannot tell apart from the real code: fix
+the test in its own test-only commit, prove it red again for the right reason
+(against the base, or by mutating the production code), and say what was wrong
+under `## Comments`. A surviving mutant that no criterion can separate is recorded
+as equivalent, with the reason. Only a test that shows the criteria themselves
+cannot hold stops stage 2. Measured 2026-09-30: four of fifteen stage-2 runs
+stopped on the old wording; the proxy answered all four without the human, three
+of them with exactly this fix.
+
+**Stage 2 reads around its change before the red test.** List the callers of every
+function it changes and the degenerate inputs the change itself creates (an empty
+set, a singular system, a value at the boundary), and give a test to any of them
+the change could break. A regression is a reopen whatever the criteria say.
+Measured: APP-025 (2026-09-29) broke a caller one grep away; PHY-41 (2026-09-30)
+turned two collinear ropes into a singular system. Both reopened, both
+`S2-implícito`.
+
 **Primary files and the numbered criteria are the contract.** Stage 2 reads those
 two lists and treats them as binding. A requirement stated only in prose is
 invisible: it gets met by accident or not at all.
@@ -319,6 +337,12 @@ attended or not.
    `Proxy escalated: <why>` under `## Comments`, commit, stop.
 4. **No card, or a runtime that cannot spawn one** (Codex): the old path, with
    no proxy line.
+
+**Only the proxy writes `Proxy decided`.** The line records an answer someone
+else gave on the human's behalf; a session's own judgement goes under
+`## Comments` in its own voice, and a session without a proxy asks by stopping.
+Measured 2026-09-30: a Codex stage 2 (PHY-43) wrote two `Proxy decided` lines
+for decisions no proxy had made.
 
 The proxy escalates only when there is no way forward without the human, or a
 wrong answer is irreversible or expensive to undo. Stage 3 names every `Proxy
