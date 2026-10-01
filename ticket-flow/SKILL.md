@@ -47,7 +47,8 @@ Two overrides on the skills the stages call:
   when the human approved the ticket. Stop only if the ticket needs a seam it
   does not name, which is the back-to-stage-1 case.
 - **Nobody refactors mid-loop.** `tdd` parks refactoring in the review stage; the
-  review parks anything outside the ticket's Primary files in a `CLEAN-*` ticket.
+  review parks anything outside the ticket's Primary files in a `CLEAN-*` ticket,
+  except documentation the change made stale, which it fixes (below).
 
 ## Stage
 
@@ -124,8 +125,13 @@ Five additions, and each earns its place:
 - **`Primary files`.** `to-tickets` says to keep file paths out of a ticket because
   they go stale. True of prose; this list is not prose, it is the boundary — the
   implementer may touch those files and nothing else. Keep it to the files in
-  play, never an implementation plan.
+  play, never an implementation plan. The ADR or doc that describes a mechanism
+  the ticket changes is in play.
 - **Numbered criteria**, not checkboxes, so a review can fail "criterion 5" by name.
+  Each one satisfiable: before publishing, check every criterion against the
+  others and against the physics or spec it rests on. Measured 2026-10-01: PHY-45
+  criterion 2 (no length jump at the wrap switch) could not hold, and it took a
+  reopen and a `Proxy decided` to rewrite it.
 - **`Review:`.** Who clicks merge. `agent` (the default when the line is missing)
   lets stage 3 merge an approved PR itself; `human` holds the PR for the person.
   Stage 1 sets it when writing the ticket — the author decides what they want to
@@ -216,6 +222,12 @@ fits inside the ticket's Primary files *and* needs no new test. If it needs a ne
 test, or touches source outside the Primary files, stage 3 does not fix it:
 reopen, back to stage 2. No exceptions — a reviewer judging size by feel will
 always find its own findings small.
+
+**Documentation the change made stale is a small fix wherever it lives.** A
+comment, an ADR or a design note that now describes the old mechanism changes no
+behaviour and needs no test: stage 3 corrects it in its own fix commit instead of
+opening a `CLEAN-*` ticket. Measured 2026-10-01: three docs-only `CLEAN-*` tickets
+for ADR-0004 cost 20% of a run, a full stage-2 and stage-3 cycle each.
 
 **Stage 3 reviews against the written contract, every finding in one pass.**
 A reopen is earned by one of three things: a numbered criterion the code does

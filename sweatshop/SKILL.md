@@ -75,7 +75,9 @@ meets it in the PR, and a conflict there is the human's call.
   `<branch>-asked-<yyyymmdd-hhmm>` and names it in the note, so the answer can
   resume from it while the next stage 2 still starts clean. An API outage
   spends no attempt; two in a row stop the run. A usage limit that names its
-  reset time (`try again at 1:38 PM`) is waited out instead.
+  reset time (`try again at 1:38 PM`) is waited out instead. A refused request
+  (a 400 `invalid_request_error`, such as a CLI too old for its model) stops the
+  run at once, since a retry sends the same request: update the CLI, relaunch.
 
 Both log paths are in `.git/info/exclude`: local, never in a commit.
 
@@ -143,6 +145,10 @@ repo that already has one is refused.
 Run it in a background terminal/session: a foreground tool call can time out
 before a stage ends. Say where the output lands and end the turn. Do not poll
 unless running `foreman`, which owns the watching.
+
+To pause a run, create `<tracker>/run-log/STOP`. The driver deletes it and ends
+between stages through its normal end: tree reset, session PR published, back on
+the base. Killing the process skips that end and can leave a stage half-written.
 
 The process belongs to the session that launched it. If that session dies,
 Preflight may find a ticket at `implementing` and refuse the next run. A terminal
