@@ -127,9 +127,13 @@ Stop the check-ins. When the run reopened a ticket, attribute it first
 Every run, report or not, commits the run log. The driver keeps
 `<tracker>/run-log.md` out of git on purpose (it resets the tree between
 stages), so that file lives on one disk only, and it is what the scoreboard
-compares models from. Copy it whole to `docs/run-log/run-log.md` and commit the
-copy on the session branch and on the base branch, both pushed, in the same
-commits as the report when there is one. Never un-exclude the original.
+compares models from. Merge it into `docs/run-log/run-log.md`, never copy over
+it: the copy can hold rows another machine logged (measured 2026-10-02, a copy
+over it would have deleted 38). Append this run's rows to the copy, then copy
+the merged file back over the local log, so both disks start the next run with
+the whole history. Commit the copy on the session branch and on the base branch,
+both pushed, in the same commits as the report when there is one. Never
+un-exclude the original.
 
 One message in
 chat, then notify. Three blocks:
@@ -146,11 +150,18 @@ chat, then notify. Three blocks:
   needs your decision (quote the question from `## Comments`), this PR needs your
   review, this stage is stuck and I did not touch it.
 
-## 6. Reopen attribution (every run with a reopen)
+## 6. Reopen attribution (every run with a reopen or a review fix)
 
 A reopen rate says a ticket came back, not whose fault it was. Every `reopened`
 review row of this run gets each of its findings labelled, so the scoreboard can
 charge the implementer only for what was the implementer's.
+
+A review that merges can hide the same miss: it writes the missing test or meets
+the criterion itself instead of reopening (measured 2026-10-02, Opus 5.5 xhigh did
+this on 4 of 5 merges and the scoreboard read 0 %). Every finding a merging
+review fixed in a commit of its own, and that adds proof or behaviour (a test, a
+criterion met, a red run the record lacked; not a comment or a rename), gets a
+row too, with `Round` `0`. The scoreboard counts those apart, as fixed in review.
 
 **Evidence per round:** the review's entry in `## Comments` that sent the ticket
 back, the ticket as it stood when stage 2 ran, and the diff that stage reviewed.
@@ -193,6 +204,7 @@ run's other tracker changes:
 
 `Round` is the ticket's Nth `reopened` review row in `run-log.md`, counting from
 the log's first row, not this run's: it is how `scoreboard.ps1` joins the two.
+`0` is the merging review's own fixes.
 `Implementer` and `Reviewer` are spelled as that log's `Model` column spells them.
 `When` is the reopen's date. No `|` inside a cell. Rows already in the file stay:
 the file is history, like the log.
@@ -227,7 +239,9 @@ across runs. Fewer than three: the summary is enough.
   (minutes, tokens, cache, output, cost, outcome) with a chart of where the input
   went and what was wasted, comparison with the previous runs from `run-log.md`,
   observations per model, driver and runtime issues, numbered recommendations,
-  and every `Débito humano:` line of the run.
+  every `Débito humano:` line of the run, and every `Proxy decided` line of the
+  run's tickets, quoted per ticket. Those are the calls made on the human's
+  behalf; a count without the text sends them hunting through the tickets.
 - **Reopen attribution:** section 6's rows for this run as a table (ticket, round,
   finding, label, why, and who judged it when it was not you), the totals per label,
   and the drip-feeding and churn cases. Place it before the scoreboard, since the
@@ -246,7 +260,9 @@ across runs. Fewer than three: the summary is enough.
   - Judge an implementer by the `S2 rate`, not the raw reopen rate: a reopen with no
     S2 finding was the spec's or the reviewer's. While `Unclassified` is above zero
     the S2 rate is a floor. `S1` counts in the findings table point at stage 1,
-    `S3 noise` at the reviewer.
+    `S3 noise` at the reviewer. Read `Fixed in review for S2` beside the S2 rate:
+    a reviewer that fixes instead of reopening shows a low rate and a high fixed
+    count, and the implementer's misses are the two added together.
 
   A recommendation to change a lineup names the scoreboard rows it rests on.
 - **Numbers come from the logs, never from memory:** `run-log.md` rows, the

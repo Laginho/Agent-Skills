@@ -16,6 +16,8 @@ $ErrorActionPreference = 'Stop'
 
 function Inv($f) { [string]::Format([Globalization.CultureInfo]::InvariantCulture, $f, [object[]]$args) }
 function Median($v) { $s = @($v | Sort-Object); if ($s.Count) { $s[[int][math]::Floor($s.Count / 2)] } }
+# Logs before 2026-10-02 spelled a binding's `claude-opus-5-5`; the driver now logs `opus-5.5`.
+function ModelName($m) { $m -replace '^claude-([a-z]+)-(\d+)-(\d+)\b', '$1-$2.$3' -replace '^claude-', '' }
 
 # Both run-log shapes: 10 cells before Tokens/Cost existed, 12 after. An `api error` row
 # spent no attempt and says nothing about the model: dropped. Ids are keyed by repo,
@@ -24,7 +26,7 @@ function Rows($file, $repo) {
   foreach ($l in (Get-Content $file -Encoding UTF8)) {
     $c = @($l -split '\|' | ForEach-Object { $_.Trim() })
     if ($c.Count -notin 10, 12 -or $c[1] -notmatch '^\d{4}-\d\d-\d\d' -or $c[6] -like 'api error*') { continue }
-    [pscustomobject]@{ Key = "$repo/$($c[2])"; Stage = $c[3]; Model = $c[4]; Outcome = $c[6]
+    [pscustomobject]@{ Key = "$repo/$($c[2])"; Stage = $c[3]; Model = ModelName $c[4]; Outcome = $c[6]
                        Min = [int]($c[8] -replace '\D', '')
                        Cost = $(if ($c.Count -eq 12 -and $c[10] -match '^\$') { [double]($c[10] -replace '\$', '') } else { $null }) }
   }
@@ -32,18 +34,21 @@ function Rows($file, $repo) {
 
 # One row per finding of a reopen: | When | ID | Round | Implementer | Reviewer | Label | Finding | Why |.
 # Round N is the ticket's Nth `reopened` review row in run-log.md, which is how the two join.
+# Round 0 is a finding the merging review fixed itself instead of reopening.
 function Findings($file, $repo) {
   foreach ($l in (Get-Content $file -Encoding UTF8)) {
     $c = @($l -split '\|' | ForEach-Object { $_.Trim() })
     if ($c.Count -ne 10 -or $c[1] -notmatch '^\d{4}-\d\d-\d\d' -or $c[3] -notmatch '^\d+$') { continue }
-    [pscustomobject]@{ Key = "$repo/$($c[2])#$($c[3])"; Pair = "$($c[4]) -> $($c[5])"; Label = $c[6] }
+    [pscustomobject]@{ Key = "$repo/$($c[2])#$($c[3])"; Pair = "$(ModelName $c[4]) -> $(ModelName $c[5])"; Label = $c[6] }
   }
 }
 
 # A review is charged to whoever sent that ticket to review last. A review that ended
 # without a verdict (`review ended at ...`) charges nobody; the next one does. A reopen
 # counts against the implementer (S2) when any of its findings is S2; one with findings
-# but no S2 was the spec's or the reviewer's; one with no findings is unclassified.
+# but no S2 was the spec's or the reviewer's; one with no findings is unclassified. A merge
+# whose review fixed an S2 finding itself (round 0) counts as fixed for S2: a miss the
+# implementer made that a stricter reviewer would have reopened.
 function Score($rows, $findings) {
   $impl = [ordered]@{}; $pair = [ordered]@{}; $waiting = @{}; $round = @{}; $seen = @{}; $s2 = @{}
   foreach ($f in $findings) { $seen[$f.Key] = 1; if ($f.Label -like 'S2*') { $s2[$f.Key] = 1 } }
@@ -58,8 +63,9 @@ function Score($rows, $findings) {
     } elseif ($r.Stage -eq 'review' -and $r.Outcome -in 'merged', 'reopened', 'waiting for you') {
       $by = if ($waiting[$r.Key]) { $waiting[$r.Key] } else { '?' }   # ?: sent to review before this log began
       $k = "$by|$($r.Model)"
-      if (-not $pair.Contains($k)) { $pair[$k] = [pscustomobject]@{ Impl = $by; Rev = $r.Model; Reviews = 0; Reopened = 0; S2 = 0; Unclassified = 0 } }
+      if (-not $pair.Contains($k)) { $pair[$k] = [pscustomobject]@{ Impl = $by; Rev = $r.Model; Reviews = 0; Reopened = 0; S2 = 0; Unclassified = 0; Fixed = 0 } }
       $pair[$k].Reviews++
+      if ($r.Outcome -eq 'merged' -and $s2["$($r.Key)#0"]) { $pair[$k].Fixed++ }
       if ($r.Outcome -eq 'reopened') {
         $pair[$k].Reopened++
         $round[$r.Key] = 1 + $round[$r.Key]
@@ -85,12 +91,12 @@ function Render($impl, $pair, $findings) {
   }
   ''
   # Unclassified reopens may be S2 too, so the S2 rate is a floor while any remain.
-  '| Implementer | Reviewer | Reviews | Reopened | Reopen rate | Reopened for S2 | S2 rate | Unclassified |'
-  '|---|---|---|---|---|---|---|---|'
+  '| Implementer | Reviewer | Reviews | Reopened | Reopen rate | Reopened for S2 | S2 rate | Unclassified | Fixed in review for S2 |'
+  '|---|---|---|---|---|---|---|---|---|'
   foreach ($p in $pair.Values) {
     $floor = if ($p.Unclassified) { '>=' } else { '' }
-    '| {0} | {1} | {2} | {3} | {4}% | {5} | {6}{7}% | {8} |' -f $p.Impl, $p.Rev, $p.Reviews, $p.Reopened,
-      [int](100 * $p.Reopened / $p.Reviews), $p.S2, $floor, [int](100 * $p.S2 / $p.Reviews), $p.Unclassified
+    '| {0} | {1} | {2} | {3} | {4}% | {5} | {6}{7}% | {8} | {9} |' -f $p.Impl, $p.Rev, $p.Reviews, $p.Reopened,
+      [int](100 * $p.Reopened / $p.Reviews), $p.S2, $floor, [int](100 * $p.S2 / $p.Reviews), $p.Unclassified, $p.Fixed
   }
   if (-not $findings) { return }
   # Every attributed finding, including reopens from before run-log.md began: labels, not rates.
@@ -133,13 +139,15 @@ if ($SelfCheck) {
     '| 2026-09-27 | T-1 | 1 | a high | r high | S2-implicito | x | x |',
     '| 2026-09-27 | T-1 | 1 | a high | r high | S1 | x | x |',
     '| 2026-09-27 | T-4 | 1 | a high | r high | S3-ruido | x | x |',
-    '| 2026-09-27 | T-4 | 2 | a high | r high | S2-explicito/teste ? | x | x |')
+    '| 2026-09-27 | T-4 | 2 | a high | r high | S2-explicito/teste ? | x | x |',
+    '| 2026-09-27 | T-2 | 0 | b max | r high | S2-explicito/teste | x | x |')   # fixed by the merging review
   $found = @(Findings $att 'repo')
   $impl, $pair = Score @(Rows $tmp 'repo') $found
   Remove-Item $tmp, $att
-  $got = ($pair.Values | ForEach-Object { '{0}>{1} {2}/{3} s2 {4} u{5}' -f $_.Impl, $_.Rev, $_.Reopened, $_.Reviews, $_.S2, $_.Unclassified }) -join ', '
-  if ($got -ne 'a high>r high 3/5 s2 2 u0, b max>r high 0/1 s2 0 u0, ?>r high 1/1 s2 0 u1') { throw "Score pairs: $got" }
-  $table = (Render $impl $pair $found)[-1]
+  $got = ($pair.Values | ForEach-Object { '{0}>{1} {2}/{3} s2 {4} u{5} f{6}' -f $_.Impl, $_.Rev, $_.Reopened, $_.Reviews, $_.S2, $_.Unclassified, $_.Fixed }) -join ', '
+  if ($got -ne 'a high>r high 3/5 s2 2 u0 f0, b max>r high 0/1 s2 0 u0 f1, ?>r high 1/1 s2 0 u1 f0') { throw "Score pairs: $got" }
+  if ((ModelName 'claude-opus-5-5 high') -ne 'opus-5.5 high' -or (ModelName 'claude-sonnet-5') -ne 'sonnet-5') { throw 'ModelName: a claude- id must read as its short name' }
+  $table = (Render $impl $pair $found) | Where-Object { $_ -like '| a high -> *' }
   if ($table -ne '| a high -> r high | 3 | 0 | 1 | 1 | 1 | 1 |') { throw "Findings table: $table" }
   $b = $impl['b max']
   if ("$($b.Runs) $($b.Failed) $($b.ToReview)" -ne '2 1 1') { throw "Score b: runs/failed/to-review $($b.Runs) $($b.Failed) $($b.ToReview)" }

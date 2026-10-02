@@ -76,7 +76,8 @@ function StageModel($line, $n) {
   $key = if ("$n" -match '^\d+$') { "stage $n" } else { $n }
   $m = [regex]::Match("$line", "\b$key (\w[\w.-]*(?: \d+(?:\.\d+)*)?)(?: (low|medium|high|xhigh|max|ultra))?")
   if (-not $m.Success) { return $null }
-  ($m.Groups[1].Value -replace ' ', '-').ToLower()
+  # One label per model in the run log: `claude-opus-5-5` from a binding reads as `opus-5.5`.
+  ($m.Groups[1].Value -replace ' ', '-').ToLower() -replace '^claude-([a-z]+)-(\d+)-(\d+)$', '$1-$2.$3' -replace '^claude-', ''
   if ($m.Groups[2].Success) { $m.Groups[2].Value } else { 'high' }
 }
 # What `claude --model` takes: `opus-5.5` is `claude-opus-5-5`. Codex names pass as written.
@@ -552,6 +553,7 @@ if ($SelfCheck) {
   $l = 'stage 1 x, stage 2 Opus 5.5 max, stage 3 gpt-6-luna'
   if ("$(StageModel $l 2) / $(StageModel $l 3)" -ne 'opus-5.5 max / gpt-6-luna high') { throw "StageModel: $(StageModel $l 2) / $(StageModel $l 3)" }
   if ("$(StageModel 'stage 2 sonnet-5 low' 2)" -ne 'sonnet-5 low') { throw "StageModel: $(StageModel 'stage 2 sonnet-5 low' 2)" }
+  if ("$(StageModel 'stage 2 claude-opus-5-5 high, stage 3 claude-sonnet-5' 2) / $(StageModel 'stage 2 claude-opus-5-5 high, stage 3 claude-sonnet-5' 3)" -ne 'opus-5.5 high / sonnet-5 high') { throw 'StageModel: a claude- id must log as its short name' }
   if ($null -ne (StageModel 'stage 2 opus-5.5' 3)) { throw 'StageModel: an absent stage must be $null' }
   # A hard ticket, by its header or by two reopens, gets the `hard` implementer; nothing else does.
   if ("$(StageModel 'stage 2 gpt-6.1-sol high, hard sonnet-5.5 xhigh, stage 3 gpt-6.1-sol max' 'hard')" -ne 'sonnet-5.5 xhigh') { throw 'StageModel: hard' }
