@@ -342,7 +342,8 @@ else about the driver — the session branch, the run log, how to start it — i
 ## Asking the proxy
 
 The human stops the loop only for what the human alone can decide. Everything
-else goes to the **proxy**: the repo's `proxy` agent card (`.claude/agents/proxy.md`),
+else goes to the **proxy**: the `proxy` agent card (`agents/proxy.md` in this skills repo, linked as
+`~/.claude/agents/`; its model and effort live only there),
 a stand-in human on its own model. It holds in every stage and every session,
 attended or not.
 

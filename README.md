@@ -63,6 +63,15 @@ copying: `New-Item -ItemType Junction <dir>\sweatshop -Target <clone>\sweatshop`
 on Windows (no admin needed), `ln -s <clone>/sweatshop <dir>/sweatshop` elsewhere.
 A plain copy works too; it just says so and skips the update.
 
+### 3b. The `proxy` agent (Claude Code)
+
+`agents/proxy.md` is the provisional human that `ticket-flow` and `foreman` ask
+before stopping for the user. Its model and effort live only in its frontmatter:
+to change them, edit those two lines here and nowhere else. Link the folder so
+every machine runs the same card after a `git pull`:
+`New-Item -ItemType Junction "$env:USERPROFILE\.claude\agents" -Target "<clone>\agents"`
+(`ln -s <clone>/agents ~/.claude/agents` elsewhere). Codex cannot spawn it.
+
 ### 4. Report back
 
 Tell the user which skills installed, where, and how to invoke them. Two things
