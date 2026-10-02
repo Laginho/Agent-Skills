@@ -189,7 +189,10 @@ round's own advice).
 unversioned row such as `opus` counts as you if you are any Opus), the round goes to
 GPT-6 Astra at medium effort, read-only, with this rubric and the evidence paths:
 
-    codex exec -C <repo> -m gpt-6-astra -c model_reasoning_effort=medium -c approval_policy='"never"' --sandbox read-only --color never --output-last-message <scratch>/<id>-r<n>.md "<rubric + evidence>"
+    codex exec -C <repo> -m gpt-6-astra -c model_reasoning_effort=medium -c approval_policy='"never"' --sandbox read-only --color never --output-last-message <scratch>/<id>-r<n>.md "<rubric + evidence>" < /dev/null
+
+Close its stdin as above: with stdin open, `codex exec` prints "Reading additional
+input from stdin..." and waits forever (measured 2026-10-02, 10 min lost).
 
 Its labels go in as returned. You may add a line of disagreement in the report,
 never change the row.
