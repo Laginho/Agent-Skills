@@ -1,6 +1,6 @@
 # Agent Skills
 
-Five skills for coding agents. Provider-agnostic: a skill is a folder with a
+Six skills for coding agents. Provider-agnostic: a skill is a folder with a
 `SKILL.md` inside, which is all any tool needs.
 
 | Skill | What it does |
@@ -10,8 +10,9 @@ Five skills for coding agents. Provider-agnostic: a skill is a folder with a
 | [`ticket-flow`](ticket-flow/SKILL.md) | The one-ticket-at-a-time build loop: stage 1 specifies, stage 2 implements test-first on a branch named for the id, stage 3 reviews and merges. Dispatches a bare ticket id on its `Stage:` line. Needs a repo with a local tracker (`docs/agents/issue-tracker.md`) and a bindings block in `AGENTS.md`. |
 | [`foreman`](foreman/SKILL.md) | Supervises one `sweatshop` run: standup, a background driver, 30-minute check-ins, crash handling, and a closing summary for the human. |
 | [`sweatshop`](sweatshop/SKILL.md) | The unattended driver for `ticket-flow`: launches fresh Claude Code or Codex CLI sessions, one stage at a time, each on the runtime its lineup model belongs to, collect merged tickets on one `sweatshop/*` branch, and open a single PR. |
+| [`grill-proxy`](grill-proxy/SKILL.md) | Grilling where the `proxy` agent answers the routine questions of each round and only design, taste and irreversible calls reach the human. Wraps the vendored `grilling` skill; `ticket-flow` stage 1 uses it. |
 
-All five are user-invoked (`/audit`, `/standup`, `/ticket-flow` or a bare ticket id, `/sweatshop`, `/foreman`), never fired automatically.
+All are user-invoked (`/audit`, `/standup`, `/ticket-flow` or a bare ticket id, `/sweatshop`, `/foreman`, `/grill-proxy`), never fired automatically — except `grill-proxy`, which `ticket-flow` stage 1 also calls.
 
 ## Install
 
@@ -54,8 +55,8 @@ The folder name is what the user types as `/<name>`, so keep `audit` and
 Not listed? Use whatever directory your tool documents for skills. If it has
 none, the two `SKILL.md` files still work as plain Markdown you read on demand.
 
-Copy with `cp -r audit standup ticket-flow sweatshop foreman <dir>/` or, on Windows
-PowerShell, `Copy-Item audit,standup,ticket-flow,sweatshop,foreman <dir> -Recurse`.
+Copy with `cp -r audit standup ticket-flow sweatshop foreman grill-proxy <dir>/` or, on Windows
+PowerShell, `Copy-Item audit,standup,ticket-flow,sweatshop,foreman,grill-proxy <dir> -Recurse`.
 
 `sweatshop` updates itself with `git pull` on every run, but only when it runs
 from a checkout of this repo. To get that, keep the clone and symlink instead of

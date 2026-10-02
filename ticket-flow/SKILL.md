@@ -29,7 +29,7 @@ defined here, in "What this loop adds" below — nowhere else.
 
 | # | Skill | Delivers | Stops and reports if |
 |---|---|---|---|
-| 1 | `grill-me` → `to-spec` → `to-tickets` | `spec.md` + one ticket file per ticket, `Stage: to-implement` | the human does not approve the seams or the slicing |
+| 1 | `grill-proxy` → `to-spec` → `to-tickets` | `spec.md` + one ticket file per ticket, `Stage: to-implement` | the human does not approve the seams or the slicing |
 | 2 | `tdd` | branch named for the id, `Stage: implementing`; **a test-only commit, red for the right reason**; then code commits that do not touch tests; gate green; `Stage: to-review` | the ticket needs more than one seam (back to stage 1), or a committed test proves the *contract* wrong — a criterion that cannot hold, a seam that does not exist (`Stage: blocked` + reason). A test wrong only in its harness is not a stop (below) |
 | 3 | `code-review` (Standards + Spec axes) | small fixes; then either merge, or a PR that waits | a finding is large — reopen the ticket, back to stage 2 |
 
