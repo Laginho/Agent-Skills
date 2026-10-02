@@ -141,8 +141,11 @@ foreach ($rt in @($Model2, $Model3, $ModelHard) | Where-Object { $_ } | ForEach-
 $Loop = $Base   # the loop's base: the session branch once Use-Session picks one
 $GateCmd = ($Gate -split ' ')[0]
 # Prefix form `Bash(x:*)`, not glob `Bash(x *)`: measured 2026-09-12, `Bash(npx *)`
-# was denied while `Bash(npx:*)` ran.
-$Allowed = ('Bash(git:*)', 'Bash(gh:*)', "Bash(${GateCmd}:*)", 'Bash(npx:*)', 'Bash(node:*)', 'Read', 'Edit', 'Write', 'Glob', 'Grep', 'Agent' | ForEach-Object { "`"$_`"" }) -join ' '
+# was denied while `Bash(npx:*)` ran. The same prefixes again for the PowerShell tool:
+# measured 2026-10-02, sonnet-5.5 on Windows ran the gate through it, every call was
+# denied, and SYN-019 burned an attempt asking for approval in 2 minutes.
+$Allowed = (@('git', 'gh', $GateCmd, 'npx', 'node') | ForEach-Object { "Bash(${_}:*)"; "PowerShell(${_}:*)" }) + ('Read', 'Edit', 'Write', 'Glob', 'Grep', 'Agent') | ForEach-Object { "`"$_`"" }
+$Allowed = $Allowed -join ' '
 
 # --- local-only files (never dirty the tree) -----------------------------------
 $RunLog = Join-Path $Repo "$Tracker/run-log.md"
