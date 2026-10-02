@@ -317,6 +317,9 @@ $CodexPrices = @{
   'gpt-6-sol'   = 2.00, 0.20, 2.50, 10.00
   'gpt-6.1-sol' = 2.00, 0.20, 2.50, 10.00
   'gpt-6-luna'  = 0.10, 0.01, 0.125, 0.50
+  'gpt-5.6-sol' = 4.00, 0.40, 5.00, 20.00   # promo price, through at least 2026-11-21
+  # Not on OpenAI's price page, backing model unknown; priced as gpt-5.6-luna (standard tier).
+  'codex-auto-review' = 0.20, 0.02, 0.25, 1.20
 }
 # Not Measure-Object: a field an older CLI does not emit is an error there, a 0 here.
 function Sum($objs, $name) { $s = 0.0; foreach ($o in $objs) { $s += [double]$o.$name }; $s }
