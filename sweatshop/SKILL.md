@@ -128,10 +128,10 @@ example:
 
 A mixed lineup needs both CLIs installed and logged in; the driver checks at start.
 
-Codex stages run with `--dangerously-bypass-approvals-and-sandbox`: on Windows
-its sandbox keeps `.git` read-only and cannot reach the keyring, so a sandboxed
-stage can neither commit nor push. Claude stages are held to a tool allowlist;
-Codex stages are held only by `~/.codex/rules`. Say so before a first Codex run.
+Codex stages run with `--approve-for-me`: the workspace-write sandbox, with
+every escalation judged by Codex's automatic reviewer instead of a human. On
+Windows the sandbox keeps `.git` read-only and cannot reach the keyring, so git
+and gh fail once and run on the approved retry.
 
 The repo is the current one when its `AGENTS.md` carries the `## Bindings do
 fluxo` block; otherwise ask which. When asked to run, launch the selected script

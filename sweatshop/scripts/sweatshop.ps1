@@ -255,10 +255,10 @@ function RunStage($t, $model, $effort, $minutes, $label) {
     # JSON for the usage; its `result` goes to `.final`, the same place Codex puts its last message.
     "-p `"$($t.Id)`" --model $(CliModel $model) --effort $effort --output-format json --permission-mode acceptEdits --allowedTools $Allowed"
   } else {
-    # Unsandboxed: measured 2026-09-24, the Windows workspace-write sandbox keeps
-    # .git read-only and cannot reach the keyring, so no commit, push or gh.
-    # Unlike Claude's allowlist, nothing limits commands but ~/.codex/rules.
-    "exec --model $model --config model_reasoning_effort=$effort --dangerously-bypass-approvals-and-sandbox --json --output-last-message `"$log.final`" `"$($t.Id)`""
+    # Sandboxed, with escalations judged by Codex's automatic reviewer: the Windows
+    # workspace-write sandbox keeps .git read-only and cannot reach the keyring, so
+    # git and gh fail once and pass on the approved retry (measured 2026-10-02).
+    "exec --model $model --config model_reasoning_effort=$effort --approve-for-me --json --output-last-message `"$log.final`" `"$($t.Id)`""
   }
   Say "$($t.Id) $label ($model $effort, ${minutes}m) -> $log"
   if ($DryRun) { Say "$exe $cliArgs"; return 'dry-run' }
