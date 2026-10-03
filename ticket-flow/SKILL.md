@@ -243,8 +243,10 @@ commit after the test-only one: no test file touched), or a regression — the
 change broke something that worked before it. A requirement the criteria do not
 state is none of these, however sensible: it becomes a `CLEAN-*` ticket and the
 review approves on the criteria as written. Stage 3 never rewrites a criterion's
-text; only stage 1 does. Read the whole diff before writing the verdict and list
-every finding in that verdict — a finding held back for the next pass costs a
+text; only stage 1 does. Read the whole diff before writing the verdict. In the first review block,
+record the affected callers, failure paths and cross-feature interactions examined,
+and any not examined; the numbered criterion verdicts remain the acceptance record.
+List every finding in that verdict — a finding held back for the next pass costs a
 full stage-2 cycle. A re-review checks the ❌ items and the diff since the last
 review; a new finding in code the previous pass already read is named as that
 pass's miss. Measured 2026-09-24: SYN-010 took two extra cycles (52% of its
@@ -266,7 +268,10 @@ never a copy of it.
 `Stage: to-implement`, marks which criterion fell (❌ with the reason), removes the
 ledger line, and appends a review block saying what is left. The block's
 verdict line is `Verdict: Reopen — <what fell>`: the driver counts those lines,
-and the second one sends the next stage 2 to the `hard` implementer.
+and the second one makes the driver park the ticket for the foreman to diagnose
+the cause before retrying (foreman, section 2). The next stage 2 still uses the
+`hard` implementer when configured; that escalation does not settle a contract
+gap or an earlier review miss.
 
 ## Commits and closing
 

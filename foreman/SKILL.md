@@ -55,6 +55,20 @@ the proxy can answer (section 4). One line in chat and in the notes file: what
 the stage did and anything that looks wrong. An outcome says the stage ended,
 not that it was right, and the driver has already moved on to the next ticket.
 
+**At the second reopen, diagnose before relaunching that ticket.** The driver
+parks it as `blocked` and continues other tickets. Read both review blocks and
+the intervening diff; record `Reopen diagnosis: <cause>; <next action>` under
+`## Comments`, with evidence. A new implementation defect goes to stage 2; an
+old defect missed by review gets one consolidated review of the affected paths
+before the next implementation; a contract gap goes to stage 1/proxy; a regression
+caused by review advice requires correcting that advice first. Causes can coexist.
+Use the proxy for a contract decision as in section 4. Commit the diagnosis and
+only then restore `to-implement` when the repair is concrete, on the session and
+the retained ticket branch if it has a different Stage. Keep unresolved decisions
+blocked. The existing hard-model escalation remains; changing the model alone
+is not the diagnosis. This diagnosis takes precedence over the generic blocked
+question handling below.
+
 **The 30-minute check-in is a heartbeat**, for the human away from the screen.
 Two sentences in chat, from two sources:
 
@@ -79,19 +93,29 @@ check-in finds a `.err` file with content and no live `.txt`. Read the tail of
 the stage's `.txt`, `.final` and `.err`, the task's own output, and `git -C <repo> status`.
 Say what happened, then push-notify.
 
-The driver's `finally` already restores the tree and returns to the base, so a
-stuck ticket, not a dirty tree, is what a crash leaves. A driver killed from
-outside (the session's tasks stopped, the machine off) skips `finally`: copy the
-uncommitted diff into `<tracker>/run-log/`, restore the tree and check out the
-base yourself, then:
+The driver owns each stage's process job; completed runtimes get a short exit
+grace, and cleanup stops only that job. Read `<stage>.runtime.json` for completion,
+exit, forced cleanup and infrastructure errors. Leave shared processes alone;
+process names are not ownership evidence.
 
-- `implementing`: delete the ticket's branch (`<id>` lowercased). The ticket reads
-  `to-implement` again from the session; a half-written stage is worthless
-  without the session that wrote it, and `ticket-flow` says never continue
-  blind.
-- `reviewing`: flip `Stage:` back to `to-review` on the ticket's branch, where
-  the driver reads it, and on the session branch when the driver parked it there
-  as `blocked` (`Review ended at reviewing (timeout)`); commit both.
+Before resetting interrupted work, inspect `run-log/recovery.txt`: the driver
+saves recovery refs under `refs/sweatshop-recovery/` and stashes dirty work,
+including untracked files. Preserve those refs and stashes until recovery is
+verified. A driver killed before saving needs the same preservation **before**
+checkout/reset: save HEAD under a new recovery ref, stash tracked and untracked
+edits if present, retain the stash ref, and record both. Ignored runtime evidence
+stays in `run-log/`; preserve any needed ignored project output separately.
+
+- `implementing`: preserve the ticket branch under `recovery/<timestamp>/<id>`
+  before removing its active name; record that branch in the ticket. The next
+  stage inspects saved commits and tests to choose what to reuse, rather than
+  continuing blind or discarding the attempt.
+- `reviewing`: after preservation, restore `to-review` on the ticket branch and
+  on the session if the driver parked it there; commit both.
+- `<stage>.row.txt` is the outcome saved before appending to the cumulative log.
+  If logging failed, append that row only if absent, under the matching header
+  (including `Shutdown s`), before restarting. Keep the sidecar. Never reconstruct
+  a successful outcome from the final message alone.
 
 **Restart once**, as a background task again, when the cause is environmental:
 API outage, network, `gh` or `git` transport, machine went to sleep. Any other
@@ -121,8 +145,8 @@ the one restart of section 3.
 
 ## 5. Summary (when the task ends)
 
-Stop the check-ins. When the run reopened a ticket, attribute it first
-(section 6); when it owes a report (section 7), write and commit that next.
+Stop the check-ins. Attribute reopened tickets, fixes made during review, and newly confirmed
+post-approval findings first (section 6); when it owes a report (section 7), write and commit that next.
 
 Every run, report or not, commits the run log. The driver keeps
 `<tracker>/run-log.md` out of git on purpose (it resets the tree between
@@ -145,12 +169,17 @@ chat, then notify. Three blocks:
   Link the report's PDF when there is one, with its two commits (section 7,
   **Record**).
 - **Foreman** — restarts, cleanups, every `Proxy decided` line, anything you
-  noticed and left alone.
+  noticed and left alone. Record interventions once in `<tracker>/interventions.md`:
+  `| When | Ticket | Kind | Evidence |`, with an ISO timestamp, ticket id or `-`,
+  and a link to the note/commit. Kind is `human-rescue` (unplanned human work to
+  unblock execution), `routine-approval` (the intended merge/release decision),
+  `proxy-decision`, or `automatic-recovery`. A routine approval is not a rescue.
+  Commit this record with the attribution. Older missing records are unknown.
 - **Your turn** — one line per action only the human can take: this ticket
   needs your decision (quote the question from `## Comments`), this PR needs your
   review, this stage is stuck and I did not touch it.
 
-## 6. Reopen attribution (every run with a reopen or a review fix)
+## 6. Finding attribution
 
 A reopen rate says a ticket came back, not whose fault it was. Every `reopened`
 review row of this run gets each of its findings labelled, so the scoreboard can
@@ -181,9 +210,9 @@ proxy added later. Rebuild the ticket from the session branch's commits.
 
 Tie between S1 and S2: the fix needs a decision → `S1`; it needs only care → S2.
 Append ` ?` to a borderline label. Two things belong to stage 3 whatever the label,
-and go in the report's prose: drip-feeding (a finding visible in an earlier round,
-raised only now) and review-induced churn (a regression born from the previous
-round's own advice).
+and get explicit flags plus evidence in the report: drip-feeding (a finding
+visible in an earlier round, raised only now) and review-induced churn (a
+regression born from the previous round's own advice).
 
 **Never judge yourself.** When the round's reviewer is the model you run as (an
 unversioned row such as `opus` counts as you if you are any Opus), the round goes to
@@ -201,16 +230,37 @@ never change the row.
 when missing), one row per finding, and commit it on the session branch with the
 run's other tracker changes:
 
-    | When | ID | Round | Implementer | Reviewer | Label | Finding | Why |
-    |---|---|---|---|---|---|---|---|
-    | 2026-09-27 | CLEAN-012 | 1 | sonnet | opus | S2-implícito | Filter bypassed by a `userId@` authority | Care, not a decision: the ticket is a trust boundary (d9e5300) |
+    | When | ID | Round | Implementer | Reviewer | Label | Finding | Why | Discovery | Origin | Review miss | Review churn |
+    |---|---|---|---|---|---|---|---|---|---|---|---|
 
-`Round` is the ticket's Nth `reopened` review row in `run-log.md`, counting from
-the log's first row, not this run's: it is how `scoreboard.ps1` joins the two.
-`0` is the merging review's own fixes.
-`Implementer` and `Reviewer` are spelled as that log's `Model` column spells them.
-`When` is the reopen's date. No `|` inside a cell. Rows already in the file stay:
-the file is history, like the log.
+Use `Discovery: ticket-review` for the existing reopen/fixed-in-review records.
+`Round` is the ticket's Nth reopened review row from the log's beginning, not
+this run's; `0` is the merging review's fixes. Spell models as the run log does.
+`Origin` links the responsible ticket and reviewed commit when known; otherwise
+`unknown`. `Review miss` and `Review churn` are each `yes`, `no`, or `unknown`,
+with evidence in `Why`. Preserve the S1/S2/S3 attribution: a review miss can also
+be an implementation defect. No `|` inside a cell.
+
+Before the summary, check new session PR reviews, release audit reports and
+confirmed user defect reports available since the last attribution pass. Record
+confirmed defects found **after ticket approval** in this same table, linking
+the original report/finding in `Why`; do not start another audit. Discovery is
+`session-review`, `release-audit`, or `post-release`; use `Round: -`. Identify the
+originating ticket/commit only when the history supports it, otherwise `ID: -`,
+`Origin: unknown`, and unknown models. Use `Label: unclassified` until evidence
+supports the existing rubric. These rows count discoveries separately; they do
+not enter the implementer/reviewer reopening rate. A pre-release audit catch is
+not a post-release defect. Link follow-up fixes to the same finding instead of
+counting each repeat audit as a new defect. Do not infer absence of defects from
+absence of reports, or count unconfirmed suspicions as defects.
+
+Keep historical eight-column tables intact; append a twelve-column header before
+new rows. Older flags remain unknown. Record each finding once using its source
+report and finding location; subsequent runs check those links before appending.
+The audit remains read-only except its report: attribution is done here, after
+that report exists. Commit attribution and interventions on the session with the
+run records. A confirmed later report can be incorporated at the next foreman
+summary; publication does not depend on completing this bookkeeping.
 
 ## 7. Report (runs of three or more tickets)
 
@@ -226,7 +276,7 @@ across runs. Fewer than three: the summary is enough.
   they land in the session PR. Then commit the same two files, same path, on the
   base branch and push it too: the human reads from the base, and a report that
   lives only on the session branch is invisible until the merge. Only these
-  records (report, run-log copy, `reopen-attribution.md`) go to the base directly; code still goes
+  records (report, run-log copy, `reopen-attribution.md`, `interventions.md`) go to the base directly; code still goes
   through the session PR. Identical files on both sides merge clean. Leave the
   repo on the base branch.
   The summary names both commits next to the PDF link; no hashes there means the
@@ -247,7 +297,8 @@ across runs. Fewer than three: the summary is enough.
   behalf; a count without the text sends them hunting through the tickets.
 - **Reopen attribution:** section 6's rows for this run as a table (ticket, round,
   finding, label, why, and who judged it when it was not you), the totals per label,
-  and the drip-feeding and churn cases. Place it before the scoreboard, since the
+  and the review-miss and churn cases. Separate session-review, release-audit and
+  post-release discoveries, retaining unknown origins. Place it before the scoreboard, since the
   scoreboard reads them.
 - **Scoreboard:** a section with the output of `sweatshop/scripts/scoreboard.ps1`,
   run over every repo on this machine that has a `<tracker>/run-log.md` (this run's
@@ -266,6 +317,12 @@ across runs. Fewer than three: the summary is enough.
     `S3 noise` at the reviewer. Read `Fixed in review for S2` beside the S2 rate:
     a reviewer that fixes instead of reopening shows a low rate and a high fixed
     count, and the implementer's misses are the two added together.
+
+  Read the evidence table as counts within recorded coverage, not defect rates.
+  Compare human rescues separately from routine approvals, proxy decisions and
+  automatic recoveries. `Shutdown s` is sampled runtime-completion to process-exit
+  delay, including forced shutdown; `?` is unmeasured, never zero. Preserve missing
+  history as unknown rather than comparing it with newly instrumented runs.
 
   A recommendation to change a lineup names the scoreboard rows it rests on.
 - **Numbers come from the logs, never from memory:** `run-log.md` rows, the

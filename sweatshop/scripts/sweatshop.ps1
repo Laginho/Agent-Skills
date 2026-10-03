@@ -25,6 +25,7 @@ param(
   [string]$Models
 )
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'stage-runtime.ps1')
 Set-Location $Repo
 $Repo = (Get-Location).Path
 
@@ -263,32 +264,43 @@ function RunStage($t, $model, $effort, $minutes, $label) {
   Say "$($t.Id) $label ($model $effort, ${minutes}m) -> $log"
   if ($DryRun) { Say "$exe $cliArgs"; return 'dry-run' }
   $script:LastLog = $log; $script:LastUsage = $null
-  $p = Start-Process $exe -ArgumentList $cliArgs -WorkingDirectory $Repo -NoNewWindow -PassThru `
-        -RedirectStandardOutput $log -RedirectStandardError "$log.err"
-  $null = $p.Handle   # PS 5.1: without touching Handle, ExitCode reads back as null
-  if (-not $p.WaitForExit($minutes * 60 * 1000)) {
-    & taskkill /PID $p.Id /T /F | Out-Null
-    return 'timeout'
-  }
-  # A session that dies before doing anything (auth, bad flags) is our problem,
-  # not the ticket's: stop the run instead of blaming the ticket and retrying.
-  # Measured 2026-09-14: a dropped internet connection prints only `Execution error`.
-  $j = $null
-  if ($rt -eq 'Claude') {
-    try { $j = [IO.File]::ReadAllText($log) | ConvertFrom-Json; [IO.File]::WriteAllText("$log.final", "$($j.result)") } catch { }
-  }
-  $script:LastUsage = Usage $log $model
-  if ($p.ExitCode -ne 0 -and ($rt -eq 'Codex' -or -not $j -or $j.num_turns -le 1)) {
-    Add-Content $log "`nAPI Error: $rt exited $($p.ExitCode)`n$(Get-Content "$log.err" -Raw)"
-  }
-  $code = $p.ExitCode; $p.Dispose()
-  return 'exit ' + $(if ($null -eq $code) { '?' } else { $code })
+  $script:LastInfrastructureError = $null
+  $script:LastFailureKind = 'infrastructure'
+  $run = Invoke-StageProcess $exe $cliArgs $Repo $log $rt ($minutes * 60)
+  $script:LastInfrastructureError = $run.InfrastructureError
+  $script:LastShutdownSeconds = $run.ShutdownSeconds
+  try {
+    if ($rt -eq 'Claude') {
+      try { $j = (Read-StageLog $log) | ConvertFrom-Json } catch { $j = $null }
+      if ($j) { [IO.File]::WriteAllText("$log.final", "$($j.result)") }
+    }
+    $script:LastUsage = Usage $log $model
+    if ($null -ne $run.ExitCode -and $run.ExitCode -ne 0 -and ($rt -eq 'Codex' -or -not $j -or $j.num_turns -le 1)) {
+      Add-Content $log "`nAPI Error: $rt exited $($run.ExitCode)`n$(Read-StageLog "$log.err")"
+    }
+    # A stage is handed off by commits, never by a dirty Stage: line or final message.
+    if (-not $script:LastInfrastructureError -and (GitOk status --porcelain)) {
+      $script:LastFailureKind = 'incomplete handoff'
+      $script:LastInfrastructureError = 'Stage left uncommitted work; saved for recovery.'
+    }
+  } catch { $script:LastInfrastructureError = "Stage evidence unavailable: $($_.Exception.Message)" }
+  return $run.Result
+}
+
+# A runtime/logging failure parks only this ticket; its evidence survives reset.
+function Park-Infrastructure($t, $stage, $model, $attempt, $started) {
+  if (-not $script:LastInfrastructureError) { return $false }
+  Reset-Tree $t
+  $outcome = if ($script:LastFailureKind -eq 'incomplete handoff') { 'failed (incomplete handoff), blocked' } else { 'infrastructure, blocked' }
+  LogStage $t $stage $model $attempt $outcome $started
+  Note $t "Stage stopped ($script:LastFailureKind): $script:LastInfrastructureError See $script:LastLog.runtime.json and run-log/recovery.txt; inspect the saved work before retrying." 'blocked'
+  return $true
 }
 
 # The session's last words, one line: when stage 2 stops to ask, this is the question.
 function LogTail($log, $chars = 1200) {
   $source = if ((Test-Path "$log.final") -and (Get-Item "$log.final").Length) { "$log.final" } else { $log }
-  $text = [IO.File]::ReadAllText($source)   # not Get-Content: works while the redirect handle is still open
+  $text = (Read-StageLog $source)
   if ($text.Length -gt $chars) { $text = '...' + $text.Substring($text.Length - $chars) }
   ($text -replace '\r?\n', ' / ').Trim()
 }
@@ -297,10 +309,10 @@ function LogTail($log, $chars = 1200) {
 # spend an attempt. A session that ended on a question gains nothing from a retry
 # that will only ask again: park it for a human now. Everything else is a failure.
 function Verdict($log) {
-  $text = [IO.File]::ReadAllText($log).TrimEnd()
+  $text = (Read-StageLog $log).TrimEnd()
   if ($text -match '(?m)^API Error') { return 'api-error' }
   # Claude's outage lands in its JSON `result`, which RunStage copied to `.final`.
-  if (Test-Path "$log.final") { $text = [IO.File]::ReadAllText("$log.final").TrimEnd() }
+  if (Test-Path "$log.final") { $text = (Read-StageLog "$log.final").TrimEnd() }
   if ($text -match '^API Error') { return 'api-error' }
   if ($text -match '\?\W*$') { return 'asked' }
   'failed'
@@ -324,7 +336,7 @@ $CodexPrices = @{
 # Not Measure-Object: a field an older CLI does not emit is an error there, a 0 here.
 function Sum($objs, $name) { $s = 0.0; foreach ($o in $objs) { $s += [double]$o.$name }; $s }
 function Usage($log, $model) {
-  $text = [IO.File]::ReadAllText($log)
+  $text = (Read-StageLog $log)
   if ((RuntimeOf $model) -eq 'Claude') {
     try { $j = $text | ConvertFrom-Json } catch { return $null }
     $m = @($j.modelUsage.PSObject.Properties | ForEach-Object Value)   # every model, subagents included
@@ -358,7 +370,7 @@ function NetFail($tail) { if (++$script:NetFails -ge 2) { throw "API unreachable
 # stopped the run and a human had to relaunch after the reset; wait for it instead.
 function LimitReset($log) {
   # Only the tail: a session that read this file or SKILL.md has the phrase earlier in its log.
-  $text = [IO.File]::ReadAllText($log)
+  $text = (Read-StageLog $log)
   if ($text.Length -gt 2000) { $text = $text.Substring($text.Length - 2000) }
   $m = [regex]::Match($text, 'usage limit.*?try again at (\d{1,2}:\d{2}\s?[AP]M)')
   if (-not $m.Success) { return $null }
@@ -373,7 +385,7 @@ function LimitReset($log) {
 # supported when using Codex with a ChatGPT account"; read as an outage, it took two
 # stages to stop, and `codex update` was the fix.
 function Refused($log) {
-  $text = [IO.File]::ReadAllText($log)
+  $text = (Read-StageLog $log)
   if ($text.Length -gt 2000) { $text = $text.Substring($text.Length - 2000) }
   $m = [regex]::Match($text, 'invalid_request_error\\?"\s*,\s*\\?"message\\?"\s*:\s*\\?"(.+?)\\?"')
   if ($m.Success) { $m.Groups[1].Value }
@@ -393,6 +405,7 @@ function ApiDown($tail) {
 # stages, through the normal finally (tree reset, PR published). Measured 2026-10-01:
 # the only pause was killing the driver mid-stage, twice, with no finally.
 function StopAsked {
+  if ($script:LogWriteFailed) { $script:Stopped = $true; return $true }
   $f = Join-Path $RunDir 'STOP'
   if (-not (Test-Path $f)) { return $false }
   Remove-Item $f; Say 'STOP file found; stopping between stages.'; $script:Stopped = $true; $true
@@ -400,6 +413,20 @@ function StopAsked {
 
 # Back to a clean loop base (the session); drop the ticket's branch if asked.
 function Reset-Tree($t, [switch]$DropBranch) {
+  # Save before checkout -f/clean, including untracked files and committed attempts.
+  if ((GitOk status --porcelain) -or $DropBranch) {
+    $stamp = [guid]::NewGuid().ToString('N')
+    $ref = "refs/sweatshop-recovery/$stamp"
+    $head = GitOk rev-parse HEAD
+    if (GitOk status --porcelain) {
+      GitOk stash push --include-untracked -m "sweatshop recovery $stamp" | Out-Null
+      $head = GitOk rev-parse 'stash@{0}'
+    } elseif ($t -and (git branch --list $t.Branch)) { $head = GitOk rev-parse $t.Branch }
+    GitOk update-ref $ref $head
+    $record = "$ref $head; ticket $(if ($t) { $t.Id }); log $script:LastLog"
+    Add-Content -Encoding UTF8 (Join-Path $RunDir 'recovery.txt') $record
+    Say "Saved recovery: $record"
+  }
   # Checked, not bare: a failed checkout leaves HEAD on the ticket branch, and the rest
   # of the run then commits notes there and reads every stage off it. Measured
   # 2026-09-15: that turned one bad $Loop into 70 minutes of wrong work.
@@ -431,8 +458,13 @@ function Note($t, $line, $stage) {
 function LogStage($t, $stage, $model, $attempt, $outcome, $started) {
   $mins = [int]((Get-Date) - $started).TotalMinutes
   $tokens, $cost = UsageCells $script:LastUsage
-  Add-Content -Encoding UTF8 $RunLog ('| {0} | {1} | {2} | {3} | {4} | {5} | {6} | {7}m | {8} | {9} |' -f `
-    (Get-Date -Format 'yyyy-MM-dd HH:mm'), $t.Id, $stage, $model, $attempt, $outcome, $Loop, $mins, $tokens, $cost)
+  $shutdown = if ($null -ne $script:LastShutdownSeconds) { Inv '{0:0.000}' $script:LastShutdownSeconds } else { '?' }
+  $row = '| {0} | {1} | {2} | {3} | {4} | {5} | {6} | {7}m | {8} | {9} | {10} |' -f `
+    (Get-Date -Format 'yyyy-MM-dd HH:mm'), $t.Id, $stage, $model, $attempt, $outcome, $Loop, $mins, $tokens, $cost, $shutdown
+  # The sidecar is durable even when a reader has locked the cumulative ledger.
+  [IO.File]::WriteAllText("$script:LastLog.row.txt", $row)
+  try { Add-Content -Encoding UTF8 $RunLog $row }
+  catch { $script:LogWriteFailed = $true; Say "Run log unavailable; row saved at $script:LastLog.row.txt. Stopping after this stage: $_" }
   Say "$($t.Id) $stage ($model): $outcome, $cost"
 }
 
@@ -499,12 +531,14 @@ function Median($v) { $s = @($v | Sort-Object); $s[[int][math]::Floor($s.Count /
 # duration needs something that reads prose; this just says when it is worth asking.
 function ShowSummary {
   if (-not (Test-Path $RunLog)) { return }
-  $rows = @(foreach ($l in (Get-Content $RunLog -Encoding UTF8)) {
+  try { $lines = (Read-StageLog $RunLog) -split "`n" }
+  catch { Say "Summary unavailable: run log locked; stage outcomes remain in $RunDir/*.row.txt"; return }
+  $rows = @(foreach ($l in $lines) {
     $c = @($l -split '\|' | ForEach-Object { $_.Trim() })
-    if ($c.Count -in 10, 12 -and $c[1] -match '^\d{4}-\d\d-\d\d') { , $c }   # 12: with Tokens and Cost
+    if ($c.Count -in 10, 12, 13 -and $c[1] -match '^\d{4}-\d\d-\d\d') { , $c }
   })
   if (-not $rows) { return }
-  $priced = @($rows | Where-Object { $_.Count -eq 12 -and $_[10] -match '^\$' } | ForEach-Object { [double]($_[10] -replace '\$', '') })
+  $priced = @($rows | Where-Object { $_.Count -ge 12 -and $_[10] -match '^\$' } | ForEach-Object { [double]($_[10] -replace '\$', '') })
   $med = { param($stage)
     $v = @($rows | Where-Object { $_[3] -eq $stage } | ForEach-Object { [int]($_[8] -replace '\D', '') })
     if ($v.Count) { '{0}m' -f (Median $v) } else { 'n/a' } }
@@ -619,8 +653,8 @@ Say "session: $session$(if ($DryRun) { ' (dry run: not checked out, tree read of
 if (-not $DryRun) { $Loop = $session }
 ShowTree 'Before this run'
 if (-not $DryRun) { NoneInflight }
-$hdr = '| When | ID | Stage | Model | Attempt | Outcome | Session | Took | Tokens | Cost |'
-$sep = '|---|---|---|---|---|---|---|---|---|---|'
+$hdr = '| When | ID | Stage | Model | Attempt | Outcome | Session | Took | Tokens | Cost | Shutdown s |'
+$sep = '|---|---|---|---|---|---|---|---|---|---|---|'
 if (-not (Test-Path $RunLog)) { Set-Content -Encoding UTF8 $RunLog "$hdr`n$sep" }
 elseif (-not (Select-String -Path $RunLog -SimpleMatch $hdr -Quiet)) {
   # Old rows had another shape. Backfilling would invent values that were never
@@ -642,6 +676,7 @@ while (-not (StopAsked) -and ($t = NextTicket)) {
     $started = Get-Date
     $res = RunStage $t $m2 $e2 $ImplementMinutes 'implement'
     if ($DryRun) { break }
+    if (Park-Infrastructure $t 'implement' $impl $attempt $started) { continue }
     $t = Ticket (Join-Path $Repo $t.File)
     if ($t.Stage -ne 'to-review') {
       $tail = LogTail $script:LastLog; $why = Verdict $script:LastLog
@@ -674,6 +709,7 @@ while (-not (StopAsked) -and ($t = NextTicket)) {
   $started = Get-Date
   $res = RunStage $t $Model3 $Effort3 $ReviewMinutes 'review'
   if ($DryRun) { break }
+  if (Park-Infrastructure $t 'review' "$Model3 $Effort3" $attempt $started) { continue }
   Reset-Tree $t
   GitOk pull -q --ff-only
   $t = Ticket (Join-Path $Repo $t.File)
@@ -683,6 +719,9 @@ while (-not (StopAsked) -and ($t = NextTicket)) {
   }
   $outcome = if ($names[$t.Stage]) { $names[$t.Stage] } else { "review ended at $($t.Stage) ($res)" }
   LogStage $t 'review' "$Model3 $Effort3"$attempt $outcome $started
+  if ($outcome -eq 'reopened' -and $t.Reopens -eq 2) {
+    Note $t 'Second reopen: foreman diagnosis required before retrying. Classify new defect, earlier review miss, contract gap, or review-induced churn; record cause and next action, then return to-implement only when ready.' 'blocked'
+  }
   # A review that stopped short of a verdict (`to-review`, `reviewing`) would be
   # picked again forever or never again: park it for a human.
   if (-not $names[$t.Stage]) { Note $t "Review ended at $($t.Stage) ($res); branch $($t.Branch) holds the review; left for a human" 'blocked' }

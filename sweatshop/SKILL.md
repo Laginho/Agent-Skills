@@ -30,7 +30,9 @@ no instructions of its own.** Everything a session does, it does because
    dependents start on top of what they depend on, no human merge in between.
    Stage 2 runs on the lineup's `hard` model instead of its `stage 2` one when
    the ticket says `Difficulty: hard` or carries two `Verdict: Reopen` lines;
-   the run log's `Model` column shows which one ran. The reviewer never changes.
+   the run log's `Model` column shows which one ran. After the second reopen,
+   park that ticket for the foreman's cause diagnosis before another attempt;
+   other runnable tickets continue. The reviewer never changes.
 5. **Stops and reports.** Prints the open tree, then pushes the session and
    opens its PR against the base — or updates the body if the PR exists — and
    returns to the base branch.
@@ -57,7 +59,8 @@ meets it in the PR, and a conflict there is the human's call.
 ## What the driver writes
 
 - `<tracker>/run-log.md`: one row per **stage run** — when, id, stage, model
-  with its effort (`sonnet-5 xhigh`), attempt, outcome, session, minutes, tokens, cost. One row per ticket would collapse stage 2
+  with its effort (`sonnet-5 xhigh`), attempt, outcome, session, minutes, tokens, cost, and sampled runtime-completion to process-exit
+  `Shutdown s` (`?` when unmeasured). One row per ticket would collapse stage 2
   and stage 3 into one duration and drop the model, the two axes worth
   correlating later ("tickets shaped like X cost sonnet three attempts").
   Nothing about the ticket is copied in; the ticket file is in git. The
@@ -71,6 +74,21 @@ meets it in the PR, and a conflict there is the human's call.
   that table logs `?`, never a guess: add its row from OpenAI's pricing page.
 - `<tracker>/run-log/<id>-<stage>-<when>.txt`: the session's full output (for
   Claude, its JSON result). `.final` beside it holds the session's last message.
+- Beside each stage log: `.runtime.json` records start, observed runtime completion,
+  exit, forced cleanup and infrastructure errors; `.row.txt` saves the outcome
+  before the cumulative log append. A failed append stops between stages and
+  leaves its row for reconciliation by the foreman.
+- Each CLI launches suspended into its own Windows Job Object before running.
+  Normal exit, a ten-second grace after a terminal runtime event, or the stage
+  timeout closes that job and its descendants. Existing shared services are not
+  owned by it. Broker-launched processes outside the job need explicit ownership
+  and cleanup in their QA kit. Committed ticket state decides success; a final
+  message or terminal event alone does not. Log reads retry sharing violations
+  briefly; unavailable evidence parks the ticket as an infrastructure failure.
+- Before resetting dirty work or dropping a failed attempt's branch, retain
+  commits under `refs/sweatshop-recovery/`, stash tracked/untracked edits when
+  present, and append the references to `run-log/recovery.txt`. Recovery refs are
+  outside ticket branch discovery. The foreman inspects them before retrying.
 - Under `## Comments` of a ticket, committed on the session: `Attempt N failed:
   <reason>` after a stage 2 that did not reach `to-review`; `Stage: blocked`
   after the second, or at once when the session ended on a question or committed `blocked` itself (its whole last message is kept). A stage
@@ -88,7 +106,12 @@ Both log paths are in `.git/info/exclude`: local, never in a commit.
 prints two tables: one per implementer (stage runs, failed and asked attempts,
 median minutes, cost), and the reopen rate per implementer → reviewer pair. Each
 review is charged to whoever last sent the ticket to review. It reads files only;
-`-SelfCheck` tests the attribution.
+`-SelfCheck` tests the attribution, including legacy tables. Its additional
+findings table separates ticket/session/release-audit/post-release discoveries,
+review misses and review-induced churn; `interventions.md` separates rescues from
+routine approvals, proxy decisions and automatic recovery. Unknown history stays
+unknown. Run `powershell -NoProfile -File scripts/runtime-tests.ps1` for the local
+process, log-lock and recovery regression tests (no agent or network).
 
 It prints the open tickets as a tree before and after every run, including runs
 it refuses and runs that crash. `/standup` renders the same tree for where things
