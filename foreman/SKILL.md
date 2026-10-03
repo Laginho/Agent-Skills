@@ -1,6 +1,6 @@
 ---
 name: foreman
-description: Runs a sweatshop run with someone watching — launches the driver as a background task, reads each finished stage, sends a heartbeat every 30 minutes, cleans up after a crash, and hands the human a summary at the end. Use when asked to "run the foreman", "supervise the sweatshop", "babysit the loop", or with /foreman.
+description: Runs a sweatshop run with someone watching — launches the driver as a detached process, reads each finished stage, sends a heartbeat every 30 minutes, cleans up after a crash, and hands the human a summary at the end. Use when asked to "run the foreman", "supervise the sweatshop", "babysit the loop", or with /foreman.
 ---
 
 # Foreman
@@ -19,9 +19,15 @@ ticket, a dirty tree, a ticket at `implementing` or `reviewing`, or `blocked`
 tickets waiting on the human and nothing else runnable. The driver's Preflight
 would refuse the same things; you refuse them with the tree in view.
 
-Otherwise launch the runtime's driver as a **background task** of this session
-(Claude Code's Bash background mode or a Codex terminal session; use the script
-selected by `sweatshop`). A lineup the human asks for goes on the command line
+Otherwise launch the runtime's driver (the script selected by `sweatshop`). In
+Claude Code, launch it as a **detached process** with its output in a file:
+
+    Start-Process powershell -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','<script>','<repo>',<flags> -RedirectStandardOutput <tracker>/run-log/driver-<when>.out -RedirectStandardError <tracker>/run-log/driver-<when>.out.err -WindowStyle Hidden -PassThru
+
+Not a background Bash/PowerShell task: those die at their `timeout`, 2 h at
+most (measured 2026-10-03, it killed the driver mid-review; on 2026-10-02 one
+had lived 10 h). The detached driver does not show in the session's task pane;
+tell the human its pid and `.out` path. In Codex, a terminal session. A lineup the human asks for goes on the command line
 (`-Lineup` or `-Models`, as `sweatshop/SKILL.md` says), never into the binding;
 none asked for, run the default. A pause the human asks for is the driver's
 `STOP` file (`sweatshop/SKILL.md`), never a kill. Note the
@@ -41,8 +47,9 @@ the owed report. After a restart, read them first and resume from `## Pending`.
 Never hold `<tracker>/run-log.md` open. On Windows a `tail -F` on it locks out
 the driver's `Add-Content`, and the driver crashes on its next row. `TaskStop`
 leaves the `tail` orphaned, so the lock outlives the monitor; measured
-2026-09-24, it crashed the driver twice. To watch, poll the driver's own task
-output every 30 s instead: it prints one line per finished stage
+2026-09-24, it crashed the driver twice. To watch, poll the driver's `.out` every
+30 s instead, from a background loop that exits on a new line (re-arm it each
+wake; it too dies at 2 h): it prints one line per finished stage
 (`<id> <stage> (<model>): <outcome>, $<cost>`) and every `throw`.
 
 ## 2. Per stage, and the heartbeat
@@ -88,9 +95,9 @@ only.
 
 ## 3. Crash
 
-The background task ended and its output ends in a `throw` message, or a
+The driver's process is gone and its `.out` ends in a `throw` message, or a
 check-in finds a `.err` file with content and no live `.txt`. Read the tail of
-the stage's `.txt`, `.final` and `.err`, the task's own output, and `git -C <repo> status`.
+the stage's `.txt`, `.final` and `.err`, the driver's `.out` and `.out.err`, and `git -C <repo> status`.
 Say what happened, then push-notify.
 
 The driver owns each stage's process job; completed runtimes get a short exit
@@ -117,7 +124,7 @@ stays in `run-log/`; preserve any needed ignored project output separately.
   (including `Shutdown s`), before restarting. Keep the sidecar. Never reconstruct
   a successful outcome from the final message alone.
 
-**Restart once**, as a background task again, when the cause is environmental:
+**Restart once**, detached again, when the cause is environmental:
 API outage, network, `gh` or `git` transport, machine went to sleep. Any other
 cause — a `throw` from Preflight, a script bug, the same stage failing twice —
 you report and stop; a logic failure restarted is the same failure paid twice.
