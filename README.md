@@ -67,7 +67,9 @@ wrapper is missing, ticket-flow explicitly supports that same fallback.
 from a checkout of this repo. To get that, keep the clone and symlink instead of
 copying: `New-Item -ItemType Junction <dir>\sweatshop -Target <clone>\sweatshop`
 on Windows (no admin needed), `ln -s <clone>/sweatshop <dir>/sweatshop` elsewhere.
-A plain copy works too; it just says so and skips the update.
+A plain copy works too; it skips update, including a tracked copy under another
+project's `.claude/skills/`. Only the tracked `sweatshop/scripts/` source layout
+updates its own checkout; junctions resolve to that source.
 
 ### 3b. The `proxy` agent (Claude Code)
 

@@ -19,7 +19,9 @@ if (-not ($DryRun -or $SelfCheck)) {
     try { $null = $mutex.WaitOne() } catch [Threading.AbandonedMutexException] { }
     $ErrorActionPreference = 'Continue'
     $inside = & git -C $PSScriptRoot rev-parse --is-inside-work-tree 2>$null
-    if ($LASTEXITCODE -or -not $inside) { Write-Host 'driver: standalone copy; not updated' }
+    $prefix = if ($LASTEXITCODE -eq 0 -and $inside) { & git -C $PSScriptRoot rev-parse --show-prefix 2>$null }
+    $tracked = if ($prefix -eq 'sweatshop/scripts/') { & git -C $PSScriptRoot ls-files --error-unmatch -- sweatshop.ps1 2>$null }
+    if ($prefix -ne 'sweatshop/scripts/' -or -not $tracked) { Write-Host 'driver: standalone/copied install; not updated' }
     elseif (& git -C $PSScriptRoot status --porcelain) { Write-Host 'driver: local edits; not updated' }
     else {
       $before = & git -C $PSScriptRoot rev-parse HEAD
