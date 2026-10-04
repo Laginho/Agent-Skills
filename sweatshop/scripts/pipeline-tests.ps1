@@ -83,6 +83,23 @@ Check 'committed session state wins over dirty working ticket' {
     Assert ((Ticket "$Repo/.scratch/feature/issues/T-1.md").Stage -eq 'to-implement') 'Dirty done became committed delivery'
   } finally { Pop-Location }
 }
+Check 'remote-only stage and linear local/origin histories follow the same discovery contract' {
+  Fixture remote; Push-Location $Repo
+  try {
+    WriteTicket PHY-9 to-implement; StartSession
+    GitOk checkout -qb phy/PHY-9-work; WriteTicket PHY-9 implementing; GitOk commit -qam starting
+    GitOk update-ref refs/remotes/origin/phy/PHY-9-work HEAD
+    WriteTicket PHY-9 to-review; GitOk commit -qam ready
+    Assert ((Find-TicketBranch $Repo PHY-9 -Remote) -eq 'phy/PHY-9-work') 'Normal unpushed local work became ambiguity'
+    GitOk update-ref refs/remotes/origin/phy/PHY-9-work HEAD
+    GitOk checkout -q $Loop; GitOk branch -q -D phy/PHY-9-work
+    Assert ((Ticket "$Repo/.scratch/feature/issues/PHY-9.md").Stage -eq 'to-review') 'Remote-only stage differs from dispatch'
+    GitOk checkout -qb phy/PHY-9-work $Loop
+    WriteTicket PHY-9 blocked; GitOk commit -qam divergent
+    $caught = $false; try { $null = Ticket "$Repo/.scratch/feature/issues/PHY-9.md" } catch { $caught = $_ -match 'Ambiguous' }
+    Assert $caught 'Divergent local/origin histories silently selected a stage'
+  } finally { Pop-Location }
+}
 Check 'PR preserves decisions debt deferred defects and unknown legacy acceptance' {
   Fixture disclosure; Push-Location $Repo
   try {
