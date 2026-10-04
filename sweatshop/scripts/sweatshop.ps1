@@ -71,14 +71,16 @@ $Base   = [regex]::Match($block, 'Base branch:\s*`([^`]+)`').Groups[1].Value
 # ponytail: a name prefix; give the binding a runtime column if a family ever runs on both.
 function RuntimeOf($model) { if ($model -match '^gpt-') { 'Codex' } else { 'Claude' } }
 # `opus 5.5` and `opus-5.5` both read as `opus-5.5`, the bench's label; effort is
-# optional and defaults to high. Returns model, effort; $null when the stage is absent.
+# optional and defaults to high. A trailing `fast` (Codex's /fast, the priority tier)
+# logs as `<model>-fast`: another row in the scoreboard, and `?` cost until priced.
+# Returns model, effort; $null when the stage is absent.
 # $n is a stage number, or `hard` for the implementer of hard tickets.
 function StageModel($line, $n) {
   $key = if ("$n" -match '^\d+$') { "stage $n" } else { $n }
-  $m = [regex]::Match("$line", "\b$key (\w[\w.-]*(?: \d+(?:\.\d+)*)?)(?: (low|medium|high|xhigh|max|ultra))?")
+  $m = [regex]::Match("$line", "\b$key (\w[\w.-]*(?: \d+(?:\.\d+)*)?)(?: (low|medium|high|xhigh|max|ultra))?( fast)?")
   if (-not $m.Success) { return $null }
   # One label per model in the run log: `claude-opus-5-5` from a binding reads as `opus-5.5`.
-  ($m.Groups[1].Value -replace ' ', '-').ToLower() -replace '^claude-([a-z]+)-(\d+)-(\d+)$', '$1-$2.$3' -replace '^claude-', ''
+  (($m.Groups[1].Value -replace ' ', '-').ToLower() -replace '^claude-([a-z]+)-(\d+)-(\d+)$', '$1-$2.$3' -replace '^claude-', '') + $(if ($m.Groups[3].Success) { '-fast' })
   if ($m.Groups[2].Success) { $m.Groups[2].Value } else { 'high' }
 }
 # What `claude --model` takes: `opus-5.5` is `claude-opus-5-5`. Codex names pass as written.
@@ -102,6 +104,7 @@ if (-not ($Gate -and $Base -and $Model2 -and $Model3)) { throw "Bindings block i
 # An unversioned alias moves when Anthropic ships the next model, and the lineup
 # changes under a run with nobody told. Pin it.
 foreach ($m in @($Model2, $Model3, $ModelHard) | Where-Object { $_ }) {
+  if ((RuntimeOf $m) -eq 'Claude' -and $m -match '-fast$') { throw "fast is Codex's service tier; '$m' runs on Claude." }
   if ((RuntimeOf $m) -eq 'Claude' -and $m -notmatch '\d') { throw "Claude model '$m' has no version. Write it as opus-5.5, sonnet-5, fable-5.1 or haiku-4.5." }
 }
 
@@ -259,7 +262,8 @@ function RunStage($t, $model, $effort, $minutes, $label) {
     # Sandboxed, with escalations judged by Codex's automatic reviewer: the Windows
     # workspace-write sandbox keeps .git read-only and cannot reach the keyring, so
     # git and gh fail once and pass on the approved retry (measured 2026-10-02).
-    "exec --model $model --config model_reasoning_effort=$effort --approve-for-me --json --output-last-message `"$log.final`" `"$($t.Id)`""
+    $tier = if ($model -match '-fast$') { ' --config service_tier=fast' }
+    "exec --model $($model -replace '-fast$') --config model_reasoning_effort=$effort$tier --approve-for-me --json --output-last-message `"$log.final`" `"$($t.Id)`""
   }
   Say "$($t.Id) $label ($model $effort, ${minutes}m) -> $log"
   if ($DryRun) { Say "$exe $cliArgs"; return 'dry-run' }
@@ -594,6 +598,7 @@ if ($SelfCheck) {
   if ("$(StageModel $l 2) / $(StageModel $l 3)" -ne 'opus-5.5 max / gpt-6-luna high') { throw "StageModel: $(StageModel $l 2) / $(StageModel $l 3)" }
   if ("$(StageModel 'stage 2 sonnet-5 low' 2)" -ne 'sonnet-5 low') { throw "StageModel: $(StageModel 'stage 2 sonnet-5 low' 2)" }
   if ("$(StageModel 'stage 2 claude-opus-5-5 high, stage 3 claude-sonnet-5' 2) / $(StageModel 'stage 2 claude-opus-5-5 high, stage 3 claude-sonnet-5' 3)" -ne 'opus-5.5 high / sonnet-5 high') { throw 'StageModel: a claude- id must log as its short name' }
+  if ("$(StageModel 'stage 2 gpt-6.1-sol high fast, hard gpt-6.1-sol fast' 2) / $(StageModel 'stage 2 gpt-6.1-sol high fast, hard gpt-6.1-sol fast' 'hard')" -ne 'gpt-6.1-sol-fast high / gpt-6.1-sol-fast high') { throw 'StageModel: fast' }
   if ($null -ne (StageModel 'stage 2 opus-5.5' 3)) { throw 'StageModel: an absent stage must be $null' }
   # A hard ticket, by its header or by two reopens, gets the `hard` implementer; nothing else does.
   if ("$(StageModel 'stage 2 gpt-6.1-sol high, hard sonnet-5.5 xhigh, stage 3 gpt-6.1-sol max' 'hard')" -ne 'sonnet-5.5 xhigh') { throw 'StageModel: hard' }

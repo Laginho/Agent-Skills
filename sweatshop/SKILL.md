@@ -140,6 +140,11 @@ Never edit the binding to run a lineup. The edit dirties the tree Preflight want
 clean, and it changes the repo's default for every later run. A lineup worth
 keeping goes into the binding by a commit the user asked for.
 
+A Codex model may end in `fast` (`stage 2 gpt-6.1-sol high fast`): the stage runs
+on Codex's priority tier (`service_tier=fast`, the CLI's `/fast`) and logs as
+`gpt-6.1-sol-fast`, its own scoreboard row, with cost `?` until `$CodexPrices` has
+a `-fast` row from OpenAI's pricing page.
+
 Claude models carry their version (`opus-5.5`, `sonnet-5`, `fable-5.1`,
 `haiku-4.5`; `opus 5.5` reads the same). An unversioned `opus` is refused: an
 alias moves when a new model ships, and the lineup would change unannounced. For
