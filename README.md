@@ -58,6 +58,11 @@ none, the two `SKILL.md` files still work as plain Markdown you read on demand.
 Copy with `cp -r audit standup ticket-flow sweatshop foreman grill-proxy <dir>/` or, on Windows
 PowerShell, `Copy-Item audit,standup,ticket-flow,sweatshop,foreman,grill-proxy <dir> -Recurse`.
 
+Check `grill-proxy/SKILL.md` is discoverable under `~/.agents/skills/` for Codex
+too. Codex uses the wrapper's documented plain-`grilling` fallback when it cannot
+spawn the named Claude proxy; its answers then come from the human. If the
+wrapper is missing, ticket-flow explicitly supports that same fallback.
+
 `sweatshop` updates itself with `git pull` on every run, but only when it runs
 from a checkout of this repo. To get that, keep the clone and symlink instead of
 copying: `New-Item -ItemType Junction <dir>\sweatshop -Target <clone>\sweatshop`
@@ -72,6 +77,9 @@ to change them, edit those two lines here and nowhere else. Link the folder so
 every machine runs the same card after a `git pull`:
 `New-Item -ItemType Junction "$env:USERPROFILE\.claude\agents" -Target "<clone>\agents"`
 (`ln -s <clone>/agents ~/.claude/agents` elsewhere). Codex cannot spawn it.
+The proxy card is read-only: it returns decisions and drafts; its caller owns
+edits/commits and attributes only actual proxy answers. Compare an existing
+local card before synchronizing it so a safer local contract is preserved.
 
 ### 4. Report back
 
@@ -100,3 +108,13 @@ with it.
 ## License
 
 MIT.
+
+## Offline verification
+
+`powershell -NoProfile -ExecutionPolicy Bypass -File sweatshop/scripts/check.ps1`
+runs runtime regressions, pipeline fixtures, entry-point integration checks and
+both self-checks. It uses disposable local Git repositories and fake CLIs, with
+no models, credentials or external services. Capture the full output outside
+this repository and append the exit code; read that log instead of rerunning
+the suite for another filter. Agent-facing edits are production changes and
+are included in gate identity.

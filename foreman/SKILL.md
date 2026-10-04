@@ -142,7 +142,7 @@ a line in the summary, not a commit. Subagents: only the proxy.
 It came from a runtime or a session that did not ask the proxy. Spawn the repo's
 `proxy` agent with the ticket id, the question and the evidence from `## Comments`
 and the stage's `.txt`, plus the branch the driver kept for the attempt
-(`<branch>-asked-<when>`, named in the `Attempt N stopped to ask` line), so the
+(`recovery/asked/<when>/<ID>`, or a legacy `<branch>-asked-<when>`, named in the `Attempt N stopped to ask` line), so the
 answer can say "resume from it" instead of starting over. Follow
 `ticket-flow`'s "Asking the proxy": record
 `Proxy decided` (folded into the body when it changes the contract) and set
@@ -169,6 +169,21 @@ un-exclude the original.
 One message in
 chat, then notify. Three blocks:
 
+Before this summary, check the feature acceptance scenarios in the original
+`spec.md` against the integrated session. Run the small supported observable
+probes, reusing existing evidence for identical code. Record scenario, outcome,
+evidence and any unexamined coverage. Human playtests or unavailable devices
+remain pending. Add `Acceptance` and `Disclosure` lines as ticket-flow defines,
+including known deferred defects, links and integration/release impact. Updating
+an older done ticket's comments provides context, not a newly produced ticket.
+Refresh the existing session PR body by incorporating the new disclosures in
+the existing ticket-linked acceptance/decision sections, with `gh pr edit
+--body-file`; preserve the completed ticket count and approval lines. Metadata
+updates are the exception to section 4's code-edit boundary: switch to the
+session branch, commit only Acceptance/Disclosure and supporting evidence, push
+that branch, then return to the base. The summary and PR carry the same pending acceptance. This is a feature
+check from product goals, not another entire ticket review or full gate run.
+
 - **Produced** — the session PR's body, in its order: `Needs your call` and
   `Review: human` first, `Approve` lines after. Link the PR. End with the run's
   cost: the `Cost` column summed over this run's rows, per model, with `?` rows
@@ -185,6 +200,12 @@ chat, then notify. Three blocks:
 - **Your turn** — one line per action only the human can take: this ticket
   needs your decision (quote the question from `## Comments`), this PR needs your
   review, this stage is stuck and I did not touch it.
+
+Every confirmed unresolved finding found here needs an open follow-up or an
+explicit accepted deferral with impact and evidence. Closed-ticket Comments
+alone are history; preserve their link and give the finding a visible destination.
+Meaningful production behavior authored during review needs the independent
+review record required by ticket-flow; absence is a pending integration condition.
 
 ## 6. Finding attribution
 

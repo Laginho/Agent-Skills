@@ -26,12 +26,19 @@ in chat, not a file.
      `git show <loop base>:<path>` to read — never from the working tree unless it
      is the loop's base checked out. Name an open session in **Em andamento** with
      `git rev-list --count <base>..<session>` commits ahead.
-   - **Ticket branches.** A ticket mid-flow has its real `Stage:` on its own branch
-     (the id lowercased, local or `origin/`). For each open ticket whose branch
+   - **Ticket branches.** Resolve `sweatshop/scripts/ticket-state.ps1` from the
+     installed skills and run `powershell -NoProfile -File <helper> -Repo <repo>
+     -Id <ID> -IncludeRemote` for each ticket. This is the same read-only discovery
+     contract as ticket-flow and the driver: lowercase exact ID or prefixed uppercase
+     ID/slug; recovery/asked attempts excluded; ambiguity requires reconciliation.
+     For each open ticket whose branch
      exists and is not merged into the loop's base, read it with
      `git show <branch>:<path>`. Exception: `blocked` on the loop's base wins — that
      is the driver parking the ticket. A ticket branch already merged is stale;
      name those in one line so they can be deleted.
+     `done` on an unmerged ticket branch is invalid handoff, not a closed blocker:
+     report the preserved branch and require merge/reopen repair before recommending
+     its dependents. A dirty ticket's working copy is not committed state.
    - **Everything else.** Any other branch in
      `git branch -a --no-merged <loop base>` is unmerged work the tracker does not
      name. List them in one line under **Em andamento** with commits ahead; do not
@@ -62,10 +69,12 @@ in chat, not a file.
    Do this lookup literally; do not infer cycles or ordering from the IDs alone. Expect
    1–4 unblocked tickets in a healthy tracker; zero means a dependency error worth
    naming.
-   - **Accepted debt is not work.** A feature dir whose name says debt (`debitos`,
-     `debt`, `accepted`) or whose tickets carry no `Priority:` line holds deliberate
-     deferrals. Count them on one line in **Aberto** as accepted debt; never list them
-     in **Desbloqueado** and never recommend them.
+   - **Accepted debt requires explicit deferral.** Use a `Deferral: accepted`
+     record naming who accepted it, why and its integration/release impact.
+     Missing Priority and directory names do not establish acceptance. An explicit
+     runnable `Stage` with satisfied blockers remains work; a contradictory
+     deferral marker requires correction, not silent removal from the queue.
+     Count genuinely deferred tickets separately in **Aberto**.
 5. **Git.** The refresh in step 2: if `git pull --ff-only` fails (no upstream,
    diverged branch, dirty tree), say so in one line and read the state as-is; never
    force, merge or stash to make it succeed.

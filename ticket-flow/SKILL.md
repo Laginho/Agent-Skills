@@ -30,11 +30,20 @@ defined here, in "What this loop adds" below — nowhere else.
 | # | Skill | Delivers | Stops and reports if |
 |---|---|---|---|
 | 1 | `grill-proxy` → `to-spec` → `to-tickets` | `spec.md` + one ticket file per ticket, `Stage: to-implement` | the human does not approve the seams or the slicing |
-| 2 | `tdd` | branch named for the id, `Stage: implementing`; **a test-only commit, red for the right reason**; then code commits that do not touch tests; gate green; `Stage: to-review` | the ticket needs more than one seam (back to stage 1), or a committed test proves the *contract* wrong — a criterion that cannot hold, a seam that does not exist (`Stage: blocked` + reason). A test wrong only in its harness is not a stop (below) |
+| 2 | `tdd` | branch named for the id, `Stage: implementing`; alternating **test-only commits, red for the right reason**, and production-only commits; gate evidence; `Stage: to-review` | the ticket needs more than one seam (back to stage 1), or a committed test proves the *contract* wrong — a criterion that cannot hold, a seam that does not exist (`Stage: blocked` + reason). A test wrong only in its harness is not a stop (below) |
 | 3 | `code-review` (Standards + Spec axes) | small fixes; then either merge, or a PR that waits | a finding is large — reopen the ticket, back to stage 2 |
 
 Stage 1 also registers new ids in the repo's plan document, if it has one, at the
 position of the original. That is the only edit anyone makes to the plan.
+
+Stage 1 selects a few end-to-end acceptance scenarios from the original product
+goal, in `spec.md`: input, observable outcome, independent reference when useful,
+and who can verify it. These are feature acceptance, separate from individual
+ticket criteria. For each test seam, explain to the owner which mistake it can
+catch, which can escape, the cost of the alternative and how to reverse the
+choice. Use a small experiment when that makes the trade-off understandable.
+If `grill-proxy` is unavailable in Codex, use `grilling` with every question to
+the human; install the wrapper as described in this skills repository's README.
 
 Refactoring outside what the ticket touched is not part of any stage. It becomes
 its own `CLEAN-*` ticket.
@@ -148,6 +157,23 @@ Six additions, and each earns its place:
 Also per effort directory: `ledger.md`, a `| Data | ID | Commit |` table of closed
 tickets, one line each, written when a ticket reaches `done`.
 
+### Delivery disclosures
+
+Before closing, record `Acceptance: passed | <evidence link>`,
+`Acceptance: pending | <what remains and evidence>`, or `Acceptance: unknown`.
+This describes product acceptance; `Verdict: Approve` describes the ticket's
+implementation. Missing legacy acceptance remains unknown.
+
+For each contract change, pending product check or unresolved known defect use
+one line: `Disclosure: decision|pending|deferred | none|integration|release|unknown | <evidence link and explanation>`.
+Choose one value per column. `integration` requires resolving the item before
+integration; `release` may permit session integration but remains a release
+condition. Link a decision/review or open follow-up ticket. Preserve existing
+`Proxy decided` and `Débito humano` text; these legacy lines also enter the PR,
+with unknown impact when their evidence does not specify it. An accepted deferral
+records who accepted it, why and its impact, rather than relying on a missing
+Priority or a closed ticket comment.
+
 ## Dispatch on a bare ID
 
 A session handed nothing but an id (`OBS-004`) finds the ticket — the tracker file
@@ -160,13 +186,21 @@ stages 2 and 3: branch from it, rebase onto it, merge into it. It is the
 `sweatshop` driver's session branch, collecting every ticket of a run into one
 PR for the human. With no such branch, nothing below changes.
 
-**Find the ticket's branch before reading `Stage`.** The stage is committed on
-the ticket's branch (stage 2 names it after the id, lowercased: `obs-004`). The
-copy on the base is stale until merge, so a fresh session on `master` reads
-`to-implement` on a ticket that is actually waiting for review. Run
-`git branch --list '<id lowercased>'` first; if the branch exists and is not
-merged into the loop's base, check it out and read the ticket there. Only then
-dispatch:
+**Find the ticket's branch before reading `Stage`.** Resolve
+`sweatshop/scripts/ticket-state.ps1` from this skills installation and run
+`powershell -NoProfile -File <helper> -Repo <repo> -Id OBS-004 -IncludeRemote`.
+This read-only command is the discovery contract for dispatch, standup and the
+driver: exact lowercase ID or uppercase `<ID>[-slug]`, optionally prefixed;
+preserved `recovery/*` and old `-asked-<time>` attempts are excluded. Multiple
+active names or divergent local/origin copies stop for explicit reconciliation.
+Linear local/origin history selects the descendant; a local stage commit ahead
+of origin is normal. To resume a remote ref, create its tracking local branch if
+absent; fast-forward an existing local branch only when it is an ancestor.
+Preserve work and reconcile divergence explicitly.
+Read committed ticket text from its unmerged branch, except `blocked` on the
+loop's base wins. A merged branch uses the loop's base. An unmerged branch saying
+`done` is an invalid handoff: preserve it and repair the merge or reopen; it does
+not satisfy dependencies. Only then dispatch:
 
 | Stage | What you do |
 |---|---|
@@ -196,10 +230,11 @@ Three guards:
 
 ## The rules that hold the loop up
 
-**Tests go in their own commit, red, before any code.** The load-bearing check is
+**Each red/green cycle separates tests from production.** The load-bearing check is
 the `diff --stat` separation, not any agent's promise. Whoever writes the tests
 does not make them pass in the same commit, and stage 2 does not touch test files
-in a code commit. This rule exists because green tests have sat on top of a broken
+in a code commit. Later test-only commits and harness corrections are valid:
+each relevant cycle records its own red/green proof. This rule exists because green tests have sat on top of a broken
 parser — the tests were exercising a copy of the logic.
 
 **A committed test wrong in its harness is fixed, not escalated.** Timing, a
@@ -224,11 +259,13 @@ turned two collinear ropes into a singular system. Both reopened, both
 two lists and treats them as binding. A requirement stated only in prose is
 invisible: it gets met by accident or not at all.
 
-**Small fix, or back to stage 2 — decided mechanically.** A fix is small if it
-fits inside the ticket's Primary files *and* needs no new test. If it needs a new
-test, or touches source outside the Primary files, stage 3 does not fix it:
-reopen, back to stage 2. No exceptions — a reviewer judging size by feel will
-always find its own findings small.
+**Small fix, or back to stage 2.** Comments, stale documentation and tiny obvious
+corrections inside Primary files may be fixed in review. Meaningful production
+behavior authored during review, including test-exempt tickets, gets a fresh
+independent review of the added diff before approval. Prefer reopening to stage 2
+for behavioral repairs needing new tests or source outside Primary files; if a
+reviewer already wrote such a repair, preserve it and hand it to another reviewer.
+Record author, independent reviewer, examined diff and verdict in Resolution.
 
 **Documentation the change made stale is a small fix wherever it lives.** A
 comment, an ADR or a design note that now describes the old mechanism changes no
@@ -238,8 +275,9 @@ for ADR-0004 cost 20% of a run, a full stage-2 and stage-3 cycle each.
 
 **Stage 3 reviews against the written contract, every finding in one pass.**
 A reopen is earned by one of three things: a numbered criterion the code does
-not meet, a Primary-files or test-first rule broken (`git diff --stat` of each
-commit after the test-only one: no test file touched), or a regression — the
+not meet, a Primary-files or test-first rule broken (inspect every commit's
+`git diff --stat`: test-only red cycles alternate with production-only changes,
+with ticket metadata allowed in either), or a regression — the
 change broke something that worked before it. A requirement the criteria do not
 state is none of these, however sensible: it becomes a `CLEAN-*` ticket and the
 review approves on the criteria as written. Stage 3 never rewrites a criterion's
@@ -253,8 +291,11 @@ pass's miss. Measured 2026-09-24: SYN-010 took two extra cycles (52% of its
 time) for findings that were all visible in the first pass, two of them new
 requirements.
 
-**A finding that belongs to another ticket goes under `## Comments` on that
-ticket — never into its body.** Only stage 1 moves a comment into the body, and
+**Every confirmed unresolved finding has an open destination or an explicitly
+accepted deferral.** On an open ticket it goes under `## Comments`; on a closed
+ticket, create/link an open follow-up or record who accepted deferral, why and
+integration/release impact. A comment on a closed ticket alone is not scheduled
+work. Link the original ticket for history. Only stage 1 moves a comment into the body, and
 when it does it adds the file to Primary files and a numbered criterion. An
 unfolded comment is a note, not a requirement: prose in a body that no file and no
 criterion backs is invisible to stage 2, which will ship green without it.
@@ -282,6 +323,22 @@ Stage 3 closes by appending a `#### Resolution (YYYY-MM-DD)` block to the ticket
 decision, files, red-green proof, gate output — and adding the ledger line, in the
 same commit as `Stage: done`. **The ticket is the memory between sessions.**
 
+### Gate evidence at handoff
+
+Commit the code to test, then run the bound gate once in the foreground through
+`sweatshop/scripts/gate-evidence.ps1 -Repo <repo> -Command '<Gate>' -Log <absolute external log> -Receipt <absolute external JSON>`.
+The helper captures output, actual exit status, log hash and the tested commit.
+Filter that log for counts/errors. Reuse its receipt when code is unchanged;
+rerun only after changing code, never merely to produce paperwork. Append
+`Gate evidence: <absolute JSON path>` to the ticket in the handoff commit.
+Between the tested commit and handoff only this ticket and its feature ledger
+may change; skills, scripts and other documentation invalidate the receipt too.
+The driver checks receipt, log and equality of tested production at `to-review`, `to-merge` and
+`done`. Missing or stale evidence parks the ticket with preserved work. Logs and
+receipts are local execution evidence; summarize/link durable verification in
+Resolution for another machine's review. A legacy missing receipt is unknown,
+and the next stage needing a new handoff must create valid evidence.
+
 The review's **verdict** is one line, and it is the first line of the Resolution
 block: `Verdict: Approve`, or `Verdict: Needs your call: <one sentence why>`.
 The findings follow. "Needs your call" is for anything the reviewer is not
@@ -292,7 +349,8 @@ Merge depends on the loop's base:
 
 **Into a session branch** (a `sweatshop/*` is open):
 
-1. Rebase the ticket branch onto the session, gate green.
+1. Rebase the ticket branch onto the session. Verify gate evidence for that code;
+   reuse the green run if no production changed during rebase or review.
 2. A conflict inside the ticket's Primary files: resolve it. Outside them:
    `Stage: blocked` with the conflict under `## Comments`, commit, stop.
 3. `git checkout <session>; git merge --no-ff <ticket branch>`, then the
@@ -302,7 +360,7 @@ Merge depends on the loop's base:
 
 **Into the bindings' base** (no session), always through a PR:
 
-1. Rebase the branch onto the base branch, gate green, push, `gh pr create`.
+1. Rebase onto the base; verify gate evidence, push, `gh pr create`.
 2. Post the review as one PR comment, verdict first.
 3. `Review: agent` and the verdict is `Approve`: wait for CI
    (`gh pr checks --watch`), then `gh pr merge --merge --delete-branch`, pull the
@@ -365,16 +423,17 @@ attended or not.
 4. **No card, or a runtime that cannot spawn one** (Codex): the old path, with
    no proxy line.
 
-**Only the proxy writes `Proxy decided`.** The line records an answer someone
-else gave on the human's behalf; a session's own judgement goes under
+**Only an actual proxy answer earns `Proxy decided`.** The proxy is read-only
+and returns decision/draft text. The caller owns repository edits and commits,
+including copying that answer with its reason and attribution. A session's own judgement goes under
 `## Comments` in its own voice, and a session without a proxy asks by stopping.
 Measured 2026-09-30: a Codex stage 2 (PHY-43) wrote two `Proxy decided` lines
 for decisions no proxy had made.
 
 The proxy escalates only when there is no way forward without the human, or a
 wrong answer is irreversible or expensive to undo. Stage 3 names every `Proxy
-decided` line of the ticket in its findings, so the session PR shows what was
-decided on the human's behalf.
+decided` line of the ticket in its findings and records the disclosure above,
+so the session PR shows the answer, evidence and integration/release impact.
 
 ## A repo with no bindings block
 

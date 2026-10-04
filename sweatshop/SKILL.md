@@ -15,9 +15,11 @@ no instructions of its own.** Everything a session does, it does because
 
 ## What one run does
 
-1. **Updates itself.** `git pull --ff-only` in the repo this skill lives in. A
+1. **Updates itself before loading runtime/helpers.** `git pull --ff-only` in the repo this skill lives in. A
    pull that fails stops the run — a driver that runs stale on one machine and
-   fresh on the other is the bug this step exists to kill.
+   fresh on the other is the bug this step exists to kill. A changed revision
+   reparses the entry point once with all original arguments; the executing
+   driver file's SHA256 is announced. Standalone copies skip update.
 2. **Preflight.** Clean tree, on the bindings' base branch, base pulled, no
    ticket left `implementing` or `reviewing` by a run that died.
 3. **Picks the session.** A `sweatshop/*` branch not merged into the base —
@@ -46,7 +48,12 @@ new session, because the old one is now merged and the search skips it.
 One line per ticket that reached `done` on the session — id, `Review:`, verdict
 — with the ones that want a human first: `Needs your call` and `Review: human`
 at the top, `Approve` from `Review: agent` below. That order is the whole point:
-open the PR, read from the top, stop when the lines turn boring.
+open the PR, read from the top. The same body includes ticket-linked proxy
+decisions, pending product acceptance and known deferred defects with their
+integration/release impact. `Approve` is implementation approval; missing legacy
+acceptance is unknown. Only tickets transitioning from non-done on the base to
+done on the session count as completed. Old done tickets with comment edits
+remain disclosure context when relevant, outside that count.
 
 Edit on the branch if something needs fixing, then merge. Nothing flows back to
 the tickets; the PR is the record. A ticket you disagree with is reopened the
@@ -93,14 +100,18 @@ meets it in the PR, and a conflict there is the human's call.
   <reason>` after a stage 2 that did not reach `to-review`; `Stage: blocked`
   after the second, or at once when the session ended on a question or committed `blocked` itself (its whole last message is kept). A stage
   that asked keeps its commits: the driver renames its branch to
-  `<branch>-asked-<yyyymmdd-hhmm>` and names it in the note, so the answer can
+  `recovery/asked/<yyyymmdd-hhmmss>/<ID>` and names it in the note, so the answer can
   resume from it while the next stage 2 still starts clean. An API outage
   spends no attempt; two in a row stop the run. A usage limit that names its
   reset time (`try again at 1:38 PM`) is waited out instead. A refused request
   (a 400 `invalid_request_error`, such as a CLI too old for its model) stops the
   run at once, since a retry sends the same request: update the CLI, relaunch.
 
-Both log paths are in `.git/info/exclude`: local, never in a commit.
+Both log paths are in `.git/info/exclude`: local, never in a commit. Active branch
+discovery uses `scripts/ticket-state.ps1`, shared with dispatch and standup;
+legacy asked branches and recovery names are preserved but excluded. Ambiguity,
+unmerged `done` and missing/stale gate evidence cannot unlock dependents. A bad
+stage handoff is parked with its work retained, rather than reported as merged.
 
 `scripts/scoreboard.ps1 <repo> [<repo>...]` reads those logs across repos and
 prints two tables: one per implementer (stage runs, failed and asked attempts,
@@ -188,6 +199,10 @@ Preflight may find a ticket at `implementing` and refuse the next run. A termina
 the user owns can outlive the agent session; give them the line above when they
 ask to launch it themselves.
 
-Offer `-DryRun` (prints the tree, the session it would use and the first command;
-touches nothing) the first time a repo runs the loop, and `-SelfCheck` if the
-script itself looks wrong.
+Offer `-DryRun` (prints committed local state, session and first planned
+ticket/model; touches neither target nor source, refreshes no refs and discovers
+or authenticates no CLI) the first time a repo runs the loop. Local refs may be
+stale, which the preview states. `-SelfCheck` tests production functions in
+disposable fixtures without reading the supplied target. Both skip updates,
+target initialization and remote operations. `scripts/check.ps1` runs the full
+offline suite; it never launches the model pipeline.
