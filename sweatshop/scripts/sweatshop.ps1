@@ -354,8 +354,9 @@ function Usage($log, $model) {
   if (-not $u) { return $null }
   # OpenAI counts cached and cache-write tokens inside input_tokens; reasoning inside output_tokens.
   $in = Sum $u 'input_tokens'; $cached = Sum $u 'cached_input_tokens'; $write = Sum $u 'cache_write_input_tokens'; $out = Sum $u 'output_tokens'
-  $p = $CodexPrices[$model]
-  $cost = if ($p) { (($in - $cached - $write) * $p[0] + $cached * $p[1] + $write * $p[2] + $out * $p[3]) / 1e6 }
+  # The fast (priority) tier bills exactly twice the standard price (Bruno, 2026-10-04).
+  $p = $CodexPrices[$model -replace '-fast$']; $tier = if ($model -match '-fast$') { 2 } else { 1 }
+  $cost = if ($p) { $tier * (($in - $cached - $write) * $p[0] + $cached * $p[1] + $write * $p[2] + $out * $p[3]) / 1e6 }
   [pscustomobject]@{ In = $in; Cached = $cached; Out = $out; Cost = $cost }
 }
 # Invariant: a pt-BR machine writes `$1,23`, and the summary could not add it back up.
@@ -622,6 +623,7 @@ if ($SelfCheck) {
   # luna: 1M uncached * 0.10 + 1M cached * 0.01 + 0.1M out * 0.50 = 0.160
   if ((UsageCells (Usage $tmp 'gpt-6-luna'))[1] -ne '$0.160') { throw "Usage: Codex $((UsageCells (Usage $tmp 'gpt-6-luna'))[1])" }
   if ((UsageCells (Usage $tmp 'gpt-unpriced'))[1] -ne '?') { throw 'Usage: unpriced model must read ?' }
+  if ((UsageCells (Usage $tmp 'gpt-6-luna-fast'))[1] -ne '$0.320') { throw 'Usage: fast must bill twice the base' }
   Remove-Item $tmp
   # PrBody's order is what the human reads first: human-review and non-Approve on top.
   $body = PrBody @([pscustomobject]@{ Id = 'A-1'; Review = 'agent'; Verdict = 'Approve' },

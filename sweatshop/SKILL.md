@@ -142,8 +142,10 @@ keeping goes into the binding by a commit the user asked for.
 
 A Codex model may end in `fast` (`stage 2 gpt-6.1-sol high fast`): the stage runs
 on Codex's priority tier (`service_tier=fast`, the CLI's `/fast`) and logs as
-`gpt-6.1-sol-fast`, its own scoreboard row, with cost `?` until `$CodexPrices` has
-a `-fast` row from OpenAI's pricing page.
+`gpt-6.1-sol-fast`, its own scoreboard row, priced at twice the base model's row.
+The response's own `service_tier` echo reads `default` even on fast; the proof is
+Codex's `RUST_LOG=codex_otel=info` line (`service_tier="priority"`) and the speed
+(measured 2026-10-04: ~50 tok/s fast against 22-29 standard).
 
 Claude models carry their version (`opus-5.5`, `sonnet-5`, `fable-5.1`,
 `haiku-4.5`; `opus 5.5` reads the same). An unversioned `opus` is refused: an
