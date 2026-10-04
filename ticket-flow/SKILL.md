@@ -73,7 +73,7 @@ dispatches on; a stage that moved in a dirty working tree is a stage that can li
 | Transition | Who | In which commit |
 |---|---|---|
 | → `implementing` | stage 2 | the test-only commit, its first |
-| → `to-review` | stage 2 | its last code commit, gate green |
+| → `to-review` | stage 2 | metadata handoff after the tested code commit, with valid green gate evidence |
 | → `reviewing` | stage 3 | only if it commits a fix of its own |
 | → `done` | stage 3 | the same commit as the ledger line |
 | → `to-merge` | stage 3 | the commit the PR is opened from (no-session flow only) |
