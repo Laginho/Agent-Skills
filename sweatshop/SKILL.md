@@ -51,8 +51,9 @@ at the top, `Approve` from `Review: agent` below. That order is the whole point:
 open the PR, read from the top. The same body includes ticket-linked proxy
 decisions, pending product acceptance and known deferred defects with their
 integration/release impact. `Approve` is implementation approval; missing legacy
-acceptance is unknown. Only tickets transitioning from non-done on the base to
-done on the session count as completed. Old done tickets with comment edits
+acceptance is unknown. Tickets transitioning from non-done to done on the
+session count as completed, including an explicit reopen/recompletion cycle.
+Old done tickets with comment edits
 remain disclosure context when relevant, outside that count.
 
 Edit on the branch if something needs fixing, then merge. Nothing flows back to

@@ -224,9 +224,9 @@ function Ticket($file) {
   # Tickets that predate this loop carry only the vendored `Status:`. A closed one is
   # done; an open one has no stage to dispatch on, so it shows in the tree and never runs.
   $stage = Field $text 'Stage'
+  if (-not $stage -and (Field $text 'Status') -in 'complete', 'resolved', 'wontfix') { $stage = 'done' }
   $handoffError = if ($unmerged -and $stage -eq 'done') { "$id claims done on unmerged branch $branch; inspect and merge or reopen the preserved work." }
   if ($handoffError) { $stage = 'invalid-handoff' }
-  if (-not $stage -and (Field $text 'Status') -in 'complete', 'resolved', 'wontfix') { $stage = 'done' }
   # The last verdict is the review that closed it; a reopened ticket carries older ones.
   $vm = [regex]::Matches($text, '(?m)^Verdict:\s*(.+?)\s*$')
   $verdict = if ($vm.Count) { $vm[$vm.Count - 1].Groups[1].Value }
@@ -551,7 +551,14 @@ function CompletedTickets {
     $old = (& git show "${Base}:$($t.File)" 2>$null) -join "`n"
     $oldStage = Field $old 'Stage'
     $oldDone = $oldStage -eq 'done' -or (-not $oldStage -and (Field $old 'Status') -in 'complete', 'resolved', 'wontfix')
-    if (-not $oldDone) { $t }
+    $recompleted = $false
+    if ($oldDone) {
+      foreach ($commit in @(GitOk log --format='%H' "$Base..$Loop" -- $t.File)) {
+        $prior = (GitOk show "${commit}:$($t.File)") -join "`n"
+        if ((Field $prior 'Stage') -in 'to-implement', 'implementing', 'to-review', 'reviewing') { $recompleted = $true; break }
+      }
+    }
+    if (-not $oldDone -or $recompleted) { $t }
   }
 }
 function SessionBody {
@@ -703,7 +710,7 @@ if (-not $DryRun) {
 try {
 try { if (-not $DryRun) { Preflight } } catch { ShowTree 'Before this run (refused)'; throw }
 $session = @(Use-Session)[-1]   # [-1]: the branch is emitted last, so git chatter cannot ride out
-Say "session: $session$(if ($DryRun) { ' (dry run: not checked out, tree read off the base)' })"
+Say "session: $session$(if ($DryRun) { ' (read-only local preview; no checkout)' })"
 if (-not $DryRun -or $session -in @(GitOk for-each-ref --format='%(refname:short)' refs/heads/ refs/remotes/)) { $Loop = $session }
 ShowTree 'Before this run'
 if (-not $DryRun) { NoneInflight }
