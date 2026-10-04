@@ -156,6 +156,27 @@ Check 'gate evidence accepts metadata close but rejects stale skill or script co
     Assert $caught 'Failed gate received green evidence'
   } finally { Pop-Location }
 }
+Check 'recompleted old ticket counts only after a committed reopen cycle' {
+  Fixture recompleted; Push-Location $Repo
+  try {
+    WriteTicket T-1 done; StartSession
+    WriteTicket T-1 done none '- old comment'; GitOk commit -qam comment
+    Assert (@(CompletedTickets).Count -eq 0) 'Old comment became completion'
+    WriteTicket T-1 to-implement none 'Verdict: Reopen - confirmed defect'; GitOk commit -qam reopen
+    WriteTicket T-1 done none 'Verdict: Approve'; GitOk commit -qam repair
+    Assert (@(CompletedTickets).Count -eq 1) 'Real reopened delivery disappeared from completed work'
+  } finally { Pop-Location }
+}
+Check 'legacy closed status on an unmerged branch cannot release a dependency' {
+  Fixture legacy; Push-Location $Repo
+  try {
+    WriteTicket T-1 to-implement; WriteTicket T-2 to-implement T-1; StartSession
+    GitOk checkout -qb t-1
+    [IO.File]::WriteAllText("$Repo/.scratch/feature/issues/T-1.md", "# T-1: legacy`nStatus: resolved`n")
+    GitOk commit -qam invalid; GitOk checkout -q $Loop
+    Assert ((Ticket "$Repo/.scratch/feature/issues/T-1.md").HandoffError -and -not (NextTicket)) 'Legacy closed status bypassed topology guard'
+  } finally { Pop-Location }
+}
 Check 'gate runner records actual exit and invalidates reused evidence on failure' {
   Fixture gaterunner; Push-Location $Repo
   try {
