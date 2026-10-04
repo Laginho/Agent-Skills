@@ -65,6 +65,8 @@ try {
   GitOk -C $Repo init -q
   GitOk -C $Repo config user.email test@example.invalid
   GitOk -C $Repo config user.name 'Runtime test'
+  $ignore = Join-Path $testRoot 'empty.ignore'; [IO.File]::WriteAllText($ignore, '')
+  GitOk -C $Repo config core.excludesFile $ignore
   Push-Location $Repo
   try {
     [IO.File]::WriteAllText((Join-Path $Repo 'tracked.txt'), 'base')

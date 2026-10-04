@@ -165,11 +165,16 @@ Check 'gate runner records actual exit and invalidates reused evidence on failur
     & powershell -NoProfile -ExecutionPolicy Bypass -File $runner -Repo $Repo -Command 'Write-Output green' -Log $log -Receipt $receipt *> (Join-Path $root 'gate-success-transcript.log')
     Assert ($LASTEXITCODE -eq 0 -and (Test-Path $receipt)) 'Successful wrapper did not record green evidence'
     Assert ((Get-Content $log -Raw) -match 'green[\s\S]*ExitCode: 0') 'Gate output or actual status missing'
+    # PS 5.1 promotes native stderr under Stop; this child is expected to fail.
+    $ErrorActionPreference = 'Continue'
     & powershell -NoProfile -ExecutionPolicy Bypass -File $runner -Repo $Repo -Command 'exit 7' -Log $log -Receipt $receipt *> (Join-Path $root 'gate-failure-transcript.log')
-    Assert ($LASTEXITCODE -ne 0 -and -not (Test-Path $receipt)) 'Failed rerun retained old green receipt'
+    $failedExit = $LASTEXITCODE; $ErrorActionPreference = 'Stop'
+    Assert ($failedExit -ne 0 -and -not (Test-Path $receipt)) 'Failed rerun retained old green receipt'
     Assert ((Get-Content $log -Raw) -match 'ExitCode: 7') 'Wrapper dropped real failure exit code'
+    $ErrorActionPreference = 'Continue'
     & powershell -NoProfile -ExecutionPolicy Bypass -File $runner -Repo $Repo -Command 'git commit -q --allow-empty -m changed' -Log $log -Receipt $receipt *> (Join-Path $root 'gate-changing-transcript.log')
-    Assert ($LASTEXITCODE -ne 0 -and -not (Test-Path $receipt)) 'Gate attributed evidence after moving HEAD'
+    $changedExit = $LASTEXITCODE; $ErrorActionPreference = 'Stop'
+    Assert ($changedExit -ne 0 -and -not (Test-Path $receipt)) 'Gate attributed evidence after moving HEAD'
   } finally { Pop-Location }
 }
 Write-Host "$checks checks; $($failures.Count) failures. Fixtures: $root"
