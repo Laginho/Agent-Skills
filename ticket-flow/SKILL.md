@@ -214,8 +214,10 @@ not satisfy dependencies. Only then dispatch:
 
 Three guards:
 
-- **`to-implement` with an unmerged branch is a stale read.** You skipped the
-  branch check above. Check the branch out and dispatch again.
+- **Reconcile `to-implement` from the base with the committed branch.** The base
+  copy may be stale: discover the active branch and read its Stage before
+  dispatch. If that branch itself says `to-implement` after a reopen, stage 2
+  resumes the retained work.
 - **Wrong model, no work.** Inside a session branch (below), skip this guard:
   the driver picked your model, maybe from a lineup given only on its command
   line. Otherwise read every `Models` line of the binding (`Models:`,
