@@ -60,7 +60,7 @@ try {
   try { Assert ((Read-StageLog $locked) -eq 'evidence') 'Shared writer prevented a log read' } finally { $handle.Dispose() }
 
   # Load production functions without executing the driver's update, launch, or GitHub paths.
-  . ([scriptblock]::Create((Load-Functions (Join-Path $PSScriptRoot 'sweatshop.ps1')) -join "`n"))
+  . ([scriptblock]::Create((Load-Functions (Join-Path $PSScriptRoot 'driver.ps1')) -join "`n"))
   $Repo = Join-Path $testRoot 'repo'; New-Item -ItemType Directory $Repo | Out-Null
   GitOk -C $Repo init -q
   GitOk -C $Repo config user.email test@example.invalid

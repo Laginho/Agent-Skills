@@ -1,4 +1,4 @@
-# Offline production regressions. Every repository and CLI here is disposable.
+﻿# Offline production regressions. Every repository and CLI here is disposable.
 $ErrorActionPreference = 'Stop'
 $root = Join-Path $env:TEMP ('sweatshop-pipeline-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory $root | Out-Null
@@ -48,6 +48,9 @@ Check 'unmerged done cannot release a dependency' {
     GitOk merge -q --no-ff t-1 -m merge
     Assert ((Ticket "$Repo/.scratch/feature/issues/T-1.md").Stage -eq 'done') 'Real merge rejected'
     Assert ((NextTicket).Id -eq 'T-2') 'Real merge did not release dependent'
+    GitOk checkout -q t-1; WriteTicket T-1 to-implement none 'Verdict: Reopen - regression'; GitOk commit -qam reopen
+    GitOk checkout -q $Loop
+    Assert ((NextTicket).Id -eq 'T-1') 'Reopened flow did not retain the active branch'
   } finally { Pop-Location }
 }
 Check 'asked branches preserve work but cannot hide a session answer' {
@@ -100,6 +103,8 @@ Check 'old done comment edit is disclosure context not a newly completed ticket'
     Assert ($done.Count -eq 1 -and $done[0].Id -eq 'T-2') 'Old done counted as produced'
     $body = SessionBody
     Assert ($body -match 'T-1' -and $body -match 'context only') 'Old ticket material context disappeared'
+    GitOk rm -q .scratch/feature/issues/T-1.md; GitOk commit -qm retire
+    Assert (@(CompletedTickets).Count -eq 1) 'Deleted historical ticket broke session publication'
   } finally { Pop-Location }
 }
 Check 'gate evidence accepts metadata close but rejects stale skill or script code' {
@@ -115,6 +120,11 @@ Check 'gate evidence accepts metadata close but rejects stale skill or script co
     WriteTicket T-1 to-review none "Gate evidence: $receipt"; GitOk commit -qam handoff
     $t = Ticket "$Repo/.scratch/feature/issues/T-1.md"
     Assert-GateEvidence $t $Loop
+    # Rewritten history can retain identical production, so a new green run is waste.
+    GitOk checkout -q --orphan rewritten
+    GitOk add .; GitOk commit -qm rewritten
+    Assert-GateEvidence $t rewritten
+    GitOk checkout -q $Loop
     foreach ($file in 'SKILL.md', 'code.ps1') {
       [IO.File]::WriteAllText("$Repo/$file", 'changed'); GitOk commit -qam changed
       $caught = $false; try { Assert-GateEvidence $t $Loop } catch { $caught = $true }
@@ -127,6 +137,22 @@ Check 'gate evidence accepts metadata close but rejects stale skill or script co
     GitOk reset -q --hard
     $caught = $false; try { Save-GateEvidence $Repo $Gate 1 $log $receipt } catch { $caught = $true }
     Assert $caught 'Failed gate received green evidence'
+  } finally { Pop-Location }
+}
+Check 'gate runner records actual exit and invalidates reused evidence on failure' {
+  Fixture gaterunner; Push-Location $Repo
+  try {
+    WriteTicket T-1 to-implement; StartSession
+    $log = Join-Path $root 'gate with spaces.log'; $receipt = Join-Path $root 'gate with spaces.json'
+    $runner = Join-Path $PSScriptRoot 'gate-evidence.ps1'
+    & powershell -NoProfile -ExecutionPolicy Bypass -File $runner -Repo $Repo -Command 'Write-Output green' -Log $log -Receipt $receipt *> (Join-Path $root 'gate-success-transcript.log')
+    Assert ($LASTEXITCODE -eq 0 -and (Test-Path $receipt)) 'Successful wrapper did not record green evidence'
+    Assert ((Get-Content $log -Raw) -match 'green[\s\S]*ExitCode: 0') 'Gate output or actual status missing'
+    & powershell -NoProfile -ExecutionPolicy Bypass -File $runner -Repo $Repo -Command 'exit 7' -Log $log -Receipt $receipt *> (Join-Path $root 'gate-failure-transcript.log')
+    Assert ($LASTEXITCODE -ne 0 -and -not (Test-Path $receipt)) 'Failed rerun retained old green receipt'
+    Assert ((Get-Content $log -Raw) -match 'ExitCode: 7') 'Wrapper dropped real failure exit code'
+    & powershell -NoProfile -ExecutionPolicy Bypass -File $runner -Repo $Repo -Command 'git commit -q --allow-empty -m changed' -Log $log -Receipt $receipt *> (Join-Path $root 'gate-changing-transcript.log')
+    Assert ($LASTEXITCODE -ne 0 -and -not (Test-Path $receipt)) 'Gate attributed evidence after moving HEAD'
   } finally { Pop-Location }
 }
 Write-Host "$checks checks; $($failures.Count) failures. Fixtures: $root"
