@@ -1,4 +1,4 @@
-# Complete entry-point tests with local repositories and fake command-line runtimes.
+﻿# Complete entry-point tests with local repositories and fake command-line runtimes.
 $ErrorActionPreference = 'Stop'
 $root = Join-Path $env:TEMP ('sweatshop-entry-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory $root | Out-Null
@@ -28,8 +28,8 @@ function Target($path, $stage) {
   G -C $path add .; G -C $path commit -qm base
 }
 function CopyScripts($path) {
-  New-Item -ItemType Directory $path -Force | Out-Null
-  Copy-Item -LiteralPath $PSScriptRoot -Destination "$path/scripts" -Recurse
+  New-Item -ItemType Directory "$path/sweatshop" -Force | Out-Null
+  Copy-Item -LiteralPath $PSScriptRoot -Destination "$path/sweatshop/scripts" -Recurse
 }
 try {
   $source = Join-Path $root 'standalone'; CopyScripts $source
@@ -46,13 +46,13 @@ try {
   $env:PATH = "$bin;$oldPath"
   $beforeTarget = Snapshot $target; $beforeSource = Snapshot $source
   $log = Join-Path $root 'dryrun.log'
-  & powershell -NoProfile -ExecutionPolicy Bypass -File "$source/scripts/sweatshop.ps1" -Repo $target -Lineup Codex -DryRun *> $log
+  & powershell -NoProfile -ExecutionPolicy Bypass -File "$source/sweatshop/scripts/sweatshop.ps1" -Repo $target -Lineup Codex -DryRun *> $log
   Assert ($LASTEXITCODE -eq 0) "DryRun failed: $(Get-Content $log -Raw)"
   Assert ((Snapshot $target) -eq $beforeTarget -and (Snapshot $source) -eq $beforeSource) 'DryRun changed source or dirty/offline target'
   Assert (-not (Test-Path $calls)) 'DryRun called/authenticated a runtime'
   Assert ((Get-Content $log -Raw) -match 'Would run T-2') 'Preview omitted session-only committed ticket'
   $checks++; Write-Host 'PASS dirty/offline DryRun is read-only and sees session-only tickets'
-  & powershell -NoProfile -ExecutionPolicy Bypass -File "$source/scripts/sweatshop.ps1" -Repo (Join-Path $root 'does-not-exist') -SelfCheck *> (Join-Path $root 'selfcheck.log')
+  & powershell -NoProfile -ExecutionPolicy Bypass -File "$source/sweatshop/scripts/sweatshop.ps1" -Repo (Join-Path $root 'does-not-exist') -SelfCheck *> (Join-Path $root 'selfcheck.log')
   Assert ($LASTEXITCODE -eq 0 -and (Snapshot $source) -eq $beforeSource -and -not (Test-Path $calls)) 'SelfCheck touched source or depended on target/CLI'
   $checks++; Write-Host 'PASS SelfCheck is isolated from supplied target and CLI'
 
@@ -60,7 +60,7 @@ try {
   # runnable stage here; fake CLIs permit startup/publication without credentials.
   $updating = Join-Path $root 'updating'; CopyScripts $updating; Init $updating
   foreach ($file in 'sweatshop.ps1', 'driver.ps1', 'stage-runtime.ps1') {
-    $p = "$updating/scripts/$file"; $s = [IO.File]::ReadAllText($p)
+    $p = "$updating/sweatshop/scripts/$file"; $s = [IO.File]::ReadAllText($p)
     if ($file -eq 'sweatshop.ps1') { $s = $s.Replace('$runtime = Join-Path', "Write-Host 'BOOT_V1'`n`$runtime = Join-Path") }
     elseif ($file -eq 'driver.ps1') { $s = $s.Replace('# --- bindings', "Write-Host 'RUNTIME_V1'`n# --- bindings") }
     else { $s = "Write-Host 'HELPER_V1'`n" + $s }
@@ -72,7 +72,7 @@ try {
   $publisher = Join-Path $root 'publisher'; G clone -q $remote $publisher
   G -C $publisher config user.name Fixture; G -C $publisher config user.email test@example.invalid; G -C $publisher config core.excludesFile $ignore
   foreach ($file in 'sweatshop.ps1', 'driver.ps1', 'stage-runtime.ps1') {
-    $p = "$publisher/scripts/$file"; [IO.File]::WriteAllText($p, ([IO.File]::ReadAllText($p)).Replace('_V1', '_V2'), [Text.UTF8Encoding]::new($true))
+    $p = "$publisher/sweatshop/scripts/$file"; [IO.File]::WriteAllText($p, ([IO.File]::ReadAllText($p)).Replace('_V1', '_V2'), [Text.UTF8Encoding]::new($true))
   }
   G -C $publisher add .; G -C $publisher commit -qm v2; G -C $publisher push -q
   $target2 = Join-Path $root 'updatetarget'; Target $target2 blocked
@@ -81,13 +81,38 @@ try {
   [IO.File]::WriteAllText("$bin/codex.cmd", "@echo off`r`nexit /b 0`r`n")
   [IO.File]::WriteAllText("$bin/gh.cmd", "@echo off`r`nif `"%2`"==`"create`" echo https://fixture.invalid/pull/1`r`nexit /b 0`r`n")
   $log = Join-Path $root 'update.log'
-  & powershell -NoProfile -ExecutionPolicy Bypass -File "$updating/scripts/sweatshop.ps1" -Repo $target2 -Lineup Codex -ImplementMinutes 2 -ReviewMinutes 3 *> $log
+  & powershell -NoProfile -ExecutionPolicy Bypass -File "$updating/sweatshop/scripts/sweatshop.ps1" -Repo $target2 -Lineup Codex -ImplementMinutes 2 -ReviewMinutes 3 *> $log
   Assert ($LASTEXITCODE -eq 0) "Updated driver failed: $(Get-Content $log -Raw)"
   $output = Get-Content $log -Raw
   Assert ($output -match 'BOOT_V2' -and $output -match 'RUNTIME_V2' -and $output -match 'HELPER_V2' -and $output -notmatch '_V1') 'Update mixed executing versions'
-  $expectedHash = (Get-FileHash "$updating/scripts/driver.ps1").Hash
+  $expectedHash = (Get-FileHash "$updating/sweatshop/scripts/driver.ps1").Hash
   Assert ($output -match $expectedHash -and $output -match "lineup 'Codex'") 'Executed hash or original lineup lost at restart'
   $checks++; Write-Host 'PASS update reparses V2 entry/runtime/helper and preserves arguments'
+
+  # A junction reaches the real skills checkout and retains its update contract.
+  $link = Join-Path $root 'linked-skill'
+  New-Item -ItemType Junction -Path $link -Target "$updating/sweatshop" | Out-Null
+  $log = Join-Path $root 'junction.log'
+  & powershell -NoProfile -ExecutionPolicy Bypass -File "$link/scripts/sweatshop.ps1" -Repo $target2 -Lineup Codex *> $log
+  Assert ($LASTEXITCODE -eq 0 -and (Get-Content $log -Raw) -match 'RUNTIME_V2') 'Junction install could not run the actual checkout'
+  $checks++; Write-Host 'PASS junction install resolves the real checkout'
+
+  # Per-project copied skills belong to another repo even if tracked there.
+  # Its local remote deliberately advances; a copied install must not pull it.
+  $holder = Join-Path $root 'unrelated-project'; Init $holder
+  New-Item -ItemType Directory "$holder/.claude/skills/sweatshop" -Force | Out-Null
+  Copy-Item -LiteralPath $PSScriptRoot -Destination "$holder/.claude/skills/sweatshop/scripts" -Recurse
+  G -C $holder add .; G -C $holder commit -qm copiedskill
+  $holderRemote = Join-Path $root 'unrelated-origin.git'; G init -q --bare -b main $holderRemote
+  G -C $holder remote add origin $holderRemote; G -C $holder push -qu origin main
+  $holderPublisher = Join-Path $root 'unrelated-publisher'; G clone -q $holderRemote $holderPublisher
+  G -C $holderPublisher config user.name Fixture; G -C $holderPublisher config user.email test@example.invalid; G -C $holderPublisher config core.excludesFile $ignore
+  [IO.File]::WriteAllText("$holderPublisher/unrelated.txt", 'this remote must not be pulled')
+  G -C $holderPublisher add .; G -C $holderPublisher commit -qm advance; G -C $holderPublisher push -q
+  $beforeHolder = Snapshot $holder; $log = Join-Path $root 'copied-project.log'
+  & powershell -NoProfile -ExecutionPolicy Bypass -File "$holder/.claude/skills/sweatshop/scripts/sweatshop.ps1" -Repo $target2 -Lineup Codex *> $log
+  Assert ($LASTEXITCODE -eq 0 -and (Snapshot $holder) -eq $beforeHolder) 'Copied project install updated its unrelated owner repository'
+  $checks++; Write-Host 'PASS copied project install leaves its unrelated repository unchanged'
 
   # Fake agent deliberately commits done without integrating. It must be parked,
   # preserved, logged as incomplete, and never release T-2.
@@ -107,7 +132,7 @@ Write-Output '{"type":"turn.completed"}'
 '@)
   [IO.File]::WriteAllText("$bin/codex.cmd", "@echo off`r`nif `"%1`"==`"login`" exit /b 0`r`npowershell -NoProfile -ExecutionPolicy Bypass -File `"$fake`"`r`nexit /b %errorlevel%`r`n")
   $log = Join-Path $root 'handoff.log'
-  & powershell -NoProfile -ExecutionPolicy Bypass -File "$source/scripts/sweatshop.ps1" -Repo $target3 -Lineup Codex *> $log
+  & powershell -NoProfile -ExecutionPolicy Bypass -File "$source/sweatshop/scripts/sweatshop.ps1" -Repo $target3 -Lineup Codex *> $log
   Assert ($LASTEXITCODE -eq 0) "Recoverable handoff failure crashed: $(Get-Content $log -Raw)"
   $session = @(G -C $target3 for-each-ref '--format=%(refname:short)' refs/heads/sweatshop/)[0]
   Assert ((G -C $target3 show "${session}:.scratch/feature/issues/T-1.md") -match 'Stage: blocked') 'Invalid handoff not parked'
