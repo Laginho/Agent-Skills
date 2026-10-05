@@ -38,6 +38,9 @@ $Repo = (Get-Location).Path
 # Use-Session, $Loop became an array, and every later `git ... $Loop` was a pathspec error.
 function GitOk {
   $ErrorActionPreference = 'Continue'
+  # Windows PowerShell decodes native output with the console's OEM code page, so a
+  # ticket's `Débito humano` came back as mojibake and dropped out of the PR body.
+  try { [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false) } catch { }
   $out = & git @args 2>&1
   if ($LASTEXITCODE) { throw "git $args`n$(($out | ForEach-Object { "$_" }) -join "`n")" }
   $out | Where-Object { $_ -isnot [Management.Automation.ErrorRecord] } | ForEach-Object { "$_" }
