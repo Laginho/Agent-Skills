@@ -72,8 +72,8 @@ Check 'prefixed and exact lowercase discovery agree and reject ambiguity' {
     GitOk checkout -q $Loop
     Assert ((Ticket "$Repo/.scratch/feature/issues/PHY-7.md").Stage -eq 'to-review') 'Prefix branch ignored'
     GitOk branch phy-7 phy/PHY-7-example
-    $caught = $false; try { $null = Ticket "$Repo/.scratch/feature/issues/PHY-7.md" } catch { $caught = $_ -match 'Ambiguous' }
-    Assert $caught 'Ambiguous branches silently chose a candidate'
+    $t = Ticket "$Repo/.scratch/feature/issues/PHY-7.md"
+    Assert ($t.Stage -eq 'invalid-handoff' -and $t.HandoffError -match 'Ambiguous') 'Ambiguous branches silently chose a candidate'
   } finally { Pop-Location }
 }
 Check 'committed session state wins over dirty working ticket' {
@@ -95,9 +95,14 @@ Check 'remote-only stage and linear local/origin histories follow the same disco
     GitOk checkout -q $Loop; GitOk branch -q -D phy/PHY-9-work
     Assert ((Ticket "$Repo/.scratch/feature/issues/PHY-9.md").Stage -eq 'to-review') 'Remote-only stage differs from dispatch'
     GitOk checkout -qb phy/PHY-9-work $Loop
-    WriteTicket PHY-9 blocked; GitOk commit -qam divergent
-    $caught = $false; try { $null = Ticket "$Repo/.scratch/feature/issues/PHY-9.md" } catch { $caught = $_ -match 'Ambiguous' }
-    Assert $caught 'Divergent local/origin histories silently selected a stage'
+    WriteTicket PHY-9 to-review; GitOk commit -qam divergent
+    GitOk checkout -q $Loop; WriteTicket PHY-10 to-implement; GitOk add .; GitOk commit -qm other
+    $t = Ticket "$Repo/.scratch/feature/issues/PHY-9.md"
+    Assert ($t.Stage -eq 'invalid-handoff' -and $t.HandoffError -match 'Ambiguous') 'Divergent local/origin histories silently selected a stage'
+    Assert ((NextTicket).Id -eq 'PHY-10') 'One ambiguous ticket stopped the others'
+    WriteTicket PHY-9 blocked; GitOk commit -qam parked
+    $t = Ticket "$Repo/.scratch/feature/issues/PHY-9.md"
+    Assert ($t.Stage -eq 'blocked' -and -not $t.HandoffError) 'Parked ambiguous ticket still refuses the next run'
   } finally { Pop-Location }
 }
 Check 'PR preserves decisions debt deferred defects and unknown legacy acceptance' {

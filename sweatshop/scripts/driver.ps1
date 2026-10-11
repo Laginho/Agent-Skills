@@ -215,7 +215,11 @@ function Ticket($file) {
   # Stage 2 names the branch `<prefix>/<ID>-<slug>` (AGENTS.md); the slug is the
   # agent's, so find it instead of guessing. Measured 2026-09-14: guessing `phy-20`
   # never matched `phy/PHY-20-...`, so every unmerged ticket read its stage off main.
-  $activeBranch = if ($id) { Find-TicketBranch $Repo $id -Remote }
+  # An ambiguous branch is this ticket's problem, not the run's: every loop reads every
+  # ticket. Measured 2026-10-11: a pushed EDIT-001, rebased locally by review, threw
+  # here once per loop and killed the driver with six tickets runnable.
+  $activeBranch = $null; $lookupError = $null
+  if ($id) { try { $activeBranch = Find-TicketBranch $Repo $id -Remote } catch { $lookupError = $_.Exception.Message } }
   $branch = $activeBranch
   if (-not $branch) { $branch = $id.ToLower() }
   # Stage lives on the ticket's branch until merge: read it there if unmerged.
@@ -231,7 +235,9 @@ function Ticket($file) {
   # done; an open one has no stage to dispatch on, so it shows in the tree and never runs.
   $stage = Field $text 'Stage'
   if (-not $stage -and (Field $text 'Status') -in 'complete', 'resolved', 'wontfix') { $stage = 'done' }
-  $handoffError = if ($unmerged -and $stage -eq 'done') { "$id claims done on unmerged branch $branch; inspect and merge or reopen the preserved work." }
+  # Parked `blocked` on the session already waits for a human; the ambiguity rides along in its note.
+  $handoffError = if ($lookupError -and $stage -ne 'blocked') { $lookupError }
+  elseif ($unmerged -and $stage -eq 'done') { "$id claims done on unmerged branch $branch; inspect and merge or reopen the preserved work." }
   if ($handoffError) { $stage = 'invalid-handoff' }
   # The last verdict is the review that closed it; a reopened ticket carries older ones.
   $vm = [regex]::Matches($text, '(?m)^Verdict:\s*(.+?)\s*$')

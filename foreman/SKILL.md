@@ -138,6 +138,12 @@ The human's calls stay the human's: questions the proxy escalated, the session
 PR merge, any edit to code on the session branch. An edit you would have made is
 a line in the summary, not a commit. Subagents: only the proxy.
 
+**Push only the session branch and the base.** Never push a ticket branch, even
+after committing a diagnosis on it: review rebases ticket branches locally, and a
+stale `origin` copy makes the branch ambiguous to every reader. Measured
+2026-10-11: one `git push origin EDIT-001` tacked onto a commit stopped the run
+overnight. A hook in `~/.claude/settings.json` refuses it too.
+
 **A `blocked` ticket with no `Proxy escalated` line is not the human's yet.**
 It came from a runtime or a session that did not ask the proxy. Spawn the repo's
 `proxy` agent with the ticket id, the question and the evidence from `## Comments`
