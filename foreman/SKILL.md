@@ -191,9 +191,13 @@ that branch, then return to the base. The summary and PR carry the same pending 
 check from product goals, not another entire ticket review or full gate run.
 
 - **Produced** — the session PR's body, in its order: `Needs your call` and
-  `Review: human` first, `Approve` lines after. Link the PR. End with the run's
+  `Review: human` first, `Approve` lines after. Link the PR. Each ticket named
+  there gets one plain-language line, as in the report (section 7, **What was
+  done**). End with the run's
   cost: the `Cost` column summed over this run's rows, per model, with `?` rows
-  counted apart. It is API list price, not what the plan charged.
+  counted apart. It is API list price, not what the plan charged. Beside each
+  Codex model's cost, the share of the weekly Codex quota it spent (section 7,
+  **Codex quota**).
   Link the report's PDF when there is one, with its two commits (section 7,
   **Record**).
 - **Foreman** — restarts, cleanups, every `Proxy decided` line, anything you
@@ -329,6 +333,21 @@ across runs. Fewer than three: the summary is enough.
   every `Débito humano:` line of the run, and every `Proxy decided` line of the
   run's tickets, quoted per ticket. Those are the calls made on the human's
   behalf; a count without the text sends them hunting through the tickets.
+- **What was done:** right after the summary, one short paragraph per ticket the
+  run worked on, for a reader who never opened the tickets (a ticket's title and
+  criteria are too abstract and too specific). Say what changes for whoever uses
+  the product, the main file, and for each reopen what was broken, its cause and
+  the file, as in "BUG-001: the scroll broke below 854x480; a hard-coded
+  `set_size` in `render_ui.py` caused it." Sources: the ticket on the session
+  branch, its merge diff and the review findings (section 6), never memory.
+  Tickets of one kind (content drafts) can share a paragraph with a line each.
+- **Codex quota:** next to the cost per model, the percentage of the weekly
+  Codex quota each Codex model spent, from `sweatshop/scripts/codex-quota.ps1
+  -Tracker <tracker> -Since <launch> -Until <last row>`. Split a model that
+  played two roles (hard implementer and reviewer) by stage. Name the plan, say
+  the total is exact while one stage is ±1 point (Codex rounds to integers), name
+  any Codex thread that ran outside the stages (it shares the quota), and say so
+  when the weekly window reset mid-run. Claude models get `--`.
 - **Reopen attribution:** section 6's rows for this run as a table (ticket, round,
   finding, label, why, and who judged it when it was not you), the totals per label,
   and the review-miss and churn cases. Separate session-review, release-audit and
