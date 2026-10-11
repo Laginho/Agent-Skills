@@ -191,6 +191,9 @@ Check 'gate runner records actual exit and invalidates reused evidence on failur
     & powershell -NoProfile -ExecutionPolicy Bypass -File $runner -Repo $Repo -Command 'Write-Output green' -Log $log -Receipt $receipt *> (Join-Path $root 'gate-success-transcript.log')
     Assert ($LASTEXITCODE -eq 0 -and (Test-Path $receipt)) 'Successful wrapper did not record green evidence'
     Assert ((Get-Content $log -Raw) -match 'green[\s\S]*ExitCode: 0') 'Gate output or actual status missing'
+    # A gate grandchild that outlives the gate (a preview server) must not hold the helper or its caller open.
+    $leak = Measure-Command { & powershell -NoProfile -ExecutionPolicy Bypass -File $runner -Repo $Repo -Command 'cmd /c start /b powershell -NoProfile -c Start-Sleep 30; Write-Output green' -Log $log -Receipt $receipt *> (Join-Path $root 'gate-leak-transcript.log') }
+    Assert ($LASTEXITCODE -eq 0 -and $leak.TotalSeconds -lt 20 -and (Test-Path $receipt)) "Gate helper waited $([int]$leak.TotalSeconds)s for a leaked grandchild"
     # PS 5.1 promotes native stderr under Stop; this child is expected to fail.
     $ErrorActionPreference = 'Continue'
     & powershell -NoProfile -ExecutionPolicy Bypass -File $runner -Repo $Repo -Command 'exit 7' -Log $log -Receipt $receipt *> (Join-Path $root 'gate-failure-transcript.log')
