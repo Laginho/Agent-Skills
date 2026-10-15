@@ -12,6 +12,17 @@ loop and `ticket-flow` still owns every stage; you own the watching. Read
 
 Language follows `standup`'s rule.
 
+**Lanes** (`sweatshop/SKILL.md`, Lanes): one foreman per lane, each in its own
+session, with the lane's clone as `<repo>` and `-Lane <folder>` among the flags.
+Everything below is per lane; make the clone first when it is missing, then
+`<clone>/<tracker>/run-log/` before redirecting into it. `<tracker>` below is
+the clone's, as an absolute path: the session's own folder stays the main
+checkout, and two lanes resolving `.scratch/` there would share one notes file. The
+standup refusals look at the lane only: a ticket at `implementing` in another
+folder is another lane's run. `.artifacts-build/` is ignored, so a clean
+`git status` on the main checkout says nothing about lanes running. Start every
+chat line and push notification with the lane's name.
+
 ## 1. Standup, then launch
 
 Run `/standup`. Stop here and say why when it shows any of: no unblocked
@@ -172,6 +183,15 @@ the whole history. Commit the copy on the session branch and on the base branch,
 both pushed, in the same commits as the report when there is one. Never
 un-exclude the original.
 
+With lanes, every lane's foreman commits these records to the base. When the
+push is rejected, fetch, reset the clone's base to `origin/<base>`, bring the
+report files back from the session branch (`git checkout <session> --
+docs/relatorios/<report>*`), redo the merge (append only rows that are absent),
+commit and push again; never resolve
+a conflict in these tables by hand. Copy the merged log back over the clone's
+log and over the main checkout's (`<clone>/../../..`), so the scoreboard there
+sees every lane.
+
 One message in
 chat, then notify. Three blocks:
 
@@ -307,14 +327,15 @@ name three or more distinct ids owes a PDF report. The chat summary scrolls
 away; the report is what the human reads before the next run and compares
 across runs. Fewer than three: the summary is enough.
 
-- **Where:** `docs/relatorios/<yyyy-mm-dd>-sweatshop-<lineup>[-N].tex` and its
-  `.pdf`. `-N` when that day already has one.
+- **Where:** `docs/relatorios/<yyyy-mm-dd>-sweatshop-<lineup>[-<lane>][-N].tex`
+  and its `.pdf`. `-N` when that day already has one.
 - **Record:** a report that is only written is not done; it is done when it is
   committed. Commit the `.tex` and the `.pdf` on the session branch and push, so
   they land in the session PR. Then commit the same two files, same path, on the
   base branch and push it too: the human reads from the base, and a report that
   lives only on the session branch is invisible until the merge. Only these
-  records (report, run-log copy, `reopen-attribution.md`, `interventions.md`) go to the base directly; code still goes
+  records (report, run-log copy, `reopen-attribution.md`, `interventions.md`, and
+  section 8's roadmap files) go to the base directly; code still goes
   through the session PR. Identical files on both sides merge clean. Leave the
   repo on the base branch.
   The summary names both commits next to the PDF link; no hashes there means the
@@ -341,6 +362,14 @@ across runs. Fewer than three: the summary is enough.
   `set_size` in `render_ui.py` caused it." Sources: the ticket on the session
   branch, its merge diff and the review findings (section 6), never memory.
   Tickets of one kind (content drafts) can share a paragraph with a line each.
+- **Roadmap image:** when `AGENTS.md` has a `Roadmap:` binding, the detailed
+  roadmap as this run left it goes right after **What was done**. On the
+  session branch, run the binding's detailed command, render its SVG to
+  `docs/relatorios/<report>-roadmap.png` as the binding says, and
+  `\includegraphics` it. Then restore the files the command wrote
+  (`git checkout -- <files>`) before committing anything: they are tracked, and
+  every lane would conflict on them. Commit the PNG with the `.tex` and `.pdf`.
+  A generator that fails means no image: quote its error in the report and go on.
 - **Codex quota:** next to the cost per model, the percentage of the weekly
   Codex quota each Codex model spent, from `sweatshop/scripts/codex-quota.ps1
   -Tracker <tracker> -Since <launch> -Until <last row>`. Split a model that
@@ -355,7 +384,8 @@ across runs. Fewer than three: the summary is enough.
   scoreboard reads them.
 - **Scoreboard:** a section with the output of `sweatshop/scripts/scoreboard.ps1`,
   run over every repo on this machine that has a `<tracker>/run-log.md` (this run's
-  repo and its siblings), pasted as printed. It is cumulative, not this run's alone:
+  repo and its siblings), pasted as printed. Never a lane's clone: after the
+  copy-back it holds the whole history, and every row would count twice. It is cumulative, not this run's alone:
   it is how the human picks lineups from real tickets instead of a dedicated
   benchmark. Compare it with the previous report's scoreboard and name the rows that
   moved. Read it under three rules:
@@ -382,4 +412,19 @@ across runs. Fewer than three: the summary is enough.
   stages' `.txt` (Codex: `turn.completed` usage), `git log` of the session. A
   count you did not recompute from them does not go in. When a row's outcome
   lies (the driver read a stale copy), say so and report what really happened.
+
+## 8. Published roadmap (after the merge)
+
+A repo whose `AGENTS.md` has a `Roadmap:` binding publishes it once per merge
+round, from the main checkout, never from a lane: the generators read the
+working tree, so only the base after the merge holds every lane's tickets, and
+the publish rewrites whole pages that two foremen would overwrite. With such a
+binding, the summary's **Your turn** ends with "merge the PR, then ask for the
+roadmap".
+
+When the human asks: on the main checkout, `git pull --ff-only` on the base, run
+the binding's commands, render the PNGs, read each published page first (the
+human edits them), replace its image, and fetch it again to confirm. Commit the
+regenerated tracked files on the base and push, as a record. Without a tool for
+the pages, leave the PNGs and say where they are.
 

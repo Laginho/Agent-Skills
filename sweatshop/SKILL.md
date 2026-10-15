@@ -213,7 +213,8 @@ merged and this lane starts a new session.
   tickets one at a time, so a chain that must stay serial stays in one lane.
 
 ticket-flow sessions take the open session that is an ancestor of HEAD
-(ticket-flow, Dispatch), so lanes need nothing else from them.
+(ticket-flow, Dispatch), so lanes need nothing else from them. Each lane gets
+its own `foreman`.
 
 Run it in a background terminal/session: a foreground tool call can time out
 before a stage ends. Say where the output lands and end the turn. Do not poll
