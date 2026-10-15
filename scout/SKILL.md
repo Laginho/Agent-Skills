@@ -9,7 +9,9 @@ Answer one question for the current repo: which lanes (`sweatshop/SKILL.md`,
 Lanes) can start now. Read-only apart from `git fetch`; launches nothing. Each lane
 gets its own `foreman` session, which the human opens.
 
-Run from the main checkout. Language follows `standup`'s rule.
+Run from the main checkout, on the machine that runs the drivers: check 3 reads a
+named mutex, which another machine cannot see, so from there every lane looks idle.
+Language follows `standup`'s rule.
 
 ## Checks
 
