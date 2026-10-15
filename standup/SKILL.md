@@ -25,7 +25,9 @@ in chat, not a file.
      `git ls-tree -r --name-only <loop base> -- .scratch/` to list,
      `git show <loop base>:<path>` to read — never from the working tree unless it
      is the loop's base checked out. Name an open session in **Em andamento** with
-     `git rev-list --count <base>..<session>` commits ahead.
+     `git rev-list --count <base>..<session>` commits ahead. Lane sessions
+     (`sweatshop/<lane>/<stamp>`) can be open side by side: each is the loop's base
+     for the tickets in `.scratch/<lane>/`; read every other ticket from `<base>`.
    - **Ticket branches.** Resolve `sweatshop/scripts/ticket-state.ps1` from the
      installed skills and run `powershell -NoProfile -File <helper> -Repo <repo>
      -Id <ID> -IncludeRemote` for each ticket. This is the same read-only discovery

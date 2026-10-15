@@ -8,6 +8,7 @@ param(
   [int]$ImplementMinutes = 45,
   [int]$ReviewMinutes = 20,
   [switch]$DryRun,
-  [switch]$SelfCheck
+  [switch]$SelfCheck,
+  [string]$Lane
 )
 & (Join-Path $PSScriptRoot 'sweatshop.ps1') @PSBoundParameters -Lineup Codex

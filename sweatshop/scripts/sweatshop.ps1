@@ -7,7 +7,8 @@ param(
   [switch]$DryRun,
   [switch]$SelfCheck,
   [string]$Lineup,
-  [string]$Models
+  [string]$Models,
+  [string]$Lane
 )
 $ErrorActionPreference = 'Stop'
 $before = $null; $after = $null

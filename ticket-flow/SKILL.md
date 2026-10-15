@@ -184,7 +184,12 @@ says how, usually `grep -rl '<ID>' <tracker path>` — and dispatches on `Stage`
 'sweatshop/*' --no-merged <base>`, remote too). Then *that* is the base for
 stages 2 and 3: branch from it, rebase onto it, merge into it. It is the
 `sweatshop` driver's session branch, collecting every ticket of a run into one
-PR for the human. With no such branch, nothing below changes.
+PR for the human. With no such branch, nothing below changes. Several open at
+once are the driver's lanes (`sweatshop/<lane>/<stamp>`), which run side by side:
+the loop's base is the one that is an ancestor of HEAD when the session starts
+(`git merge-base --is-ancestor <session> HEAD`). The driver launches each stage on
+its own session or on a ticket branch cut from it, and each session opens with its
+own commit, so only one matches.
 
 **Find the ticket's branch before reading `Stage`.** Resolve
 `sweatshop/scripts/ticket-state.ps1` from this skills installation and run

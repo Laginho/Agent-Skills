@@ -22,7 +22,10 @@ param(
   [string]$Lineup,
   # A lineup for this run only, in the binding's own syntax: 'stage 2 gpt-6-luna max, stage 3 opus-5.5 high'.
   # Never written to the repo: editing the binding would dirty the tree Preflight wants clean.
-  [string]$Models
+  [string]$Models,
+  # A tracker folder (`<tracker>/<lane>/issues`). Lanes run side by side, one clone each,
+  # each on its own session `sweatshop/<lane>/<stamp>`; only that folder's tickets run.
+  [string]$Lane
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'stage-runtime.ps1')
@@ -30,6 +33,7 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'gate-evidence.ps1') -Repo $Repo
 Set-Location $Repo
 $Repo = (Get-Location).Path
+if ($Lane -and -not $SelfCheck -and -not (Test-Path "$Tracker/$Lane/issues")) { throw "Lane '$Lane': no $Tracker/$Lane/issues in $Repo." }
 
 # PS 5.1 turns any stderr line (even a git warning) into a terminating error under
 # 2>&1 with ErrorActionPreference=Stop, so judge git by its exit code only. Merged
@@ -168,9 +172,11 @@ function Preflight {
 # leaves a ticket no stage matches: skipped forever instead of stopping the next run.
 # After Use-Session: a branch already merged into the session must not count.
 function NoneInflight {
-  $invalid = @(AllTickets | Where-Object HandoffError)
+  # Another lane's tickets are mid-run on its own session, by design.
+  $mine = @(AllTickets | Where-Object { InLane $_ })
+  $invalid = @($mine | Where-Object HandoffError)
   if ($invalid) { throw ($invalid.HandoffError -join "`n") }
-  $inflight = @(AllTickets | Where-Object { $_.Stage -in 'implementing', 'reviewing' })
+  $inflight = @($mine | Where-Object { $_.Stage -in 'implementing', 'reviewing' })
   if ($inflight) { throw "Tickets mid-run: $($inflight.Id -join ', ')" }
 }
 
@@ -181,8 +187,17 @@ function NoneInflight {
 # may have started it.
 function Use-Session {
   if (-not $DryRun) { GitOk fetch -q --prune }
-  $remoteRefs = @(GitOk for-each-ref --no-merged $Base --format='%(refname:short)' 'refs/remotes/origin/sweatshop/*')
-  $localRefs = @(GitOk for-each-ref --no-merged $Base --format='%(refname:short)' 'refs/heads/sweatshop/*')
+  $remoteRefs = @(GitOk for-each-ref --no-merged $Base --format='%(refname:short)' 'refs/remotes/origin/sweatshop')
+  $localRefs = @(GitOk for-each-ref --no-merged $Base --format='%(refname:short)' 'refs/heads/sweatshop')
+  $open = @(@($remoteRefs + $localRefs) | ForEach-Object { $_ -replace '^origin/', '' } | Select-Object -Unique)
+  # A run without a lane takes every tracker folder, so it never shares the repo with lanes.
+  $laned = @($open | Where-Object { $_ -match '^sweatshop/[^/]+/' })
+  if ($Lane -and $open.Count -gt $laned.Count) { throw "A session without a lane is open: $(($open | Where-Object { $_ -notin $laned }) -join ', '). Merge it before running lanes." }
+  if (-not $Lane -and $laned) { throw "Lane sessions are open: $($laned -join ', '). Run with -Lane <folder>, or merge them first." }
+  if ($Lane) {
+    $remoteRefs = @($remoteRefs | Where-Object { $_ -like "origin/sweatshop/$Lane/*" })
+    $localRefs = @($localRefs | Where-Object { $_ -like "sweatshop/$Lane/*" })
+  }
   $sessions = @(@($remoteRefs + $localRefs) | ForEach-Object { $_ -replace '^origin/', '' } | Select-Object -Unique)
   if ($sessions.Count -gt 1) { throw "Ambiguous open sessions: $($sessions -join ', '). Choose/reconcile the session before running." }
   $remote = $remoteRefs | Select-Object -First 1
@@ -194,7 +209,7 @@ function Use-Session {
     $s = $local
     if (-not $DryRun) { GitOk checkout -q $s; GitOk push -q -u origin $s }
   } else {
-    $s = 'sweatshop/' + (Get-Date -Format yyyy-MM-dd-HHmm)
+    $s = 'sweatshop/' + $(if ($Lane) { "$Lane/" }) + (Get-Date -Format yyyy-MM-dd-HHmm)
     # The empty commit is load-bearing: a session equal to its base counts as merged
     # into it, so the search above and ticket-flow's both miss it. Measured
     # 2026-09-24: SYN-011's review took main as its base and merged a PR there.
@@ -260,12 +275,15 @@ function AllTickets {
   GitOk ls-tree -r --name-only $Loop -- "$Tracker/" | Where-Object { $_ -like "$Tracker/*/issues/*.md" } |
     Sort-Object | ForEach-Object { Ticket (Join-Path $Repo $_) } | Where-Object Id
 }
+# Blockers count as done from any folder; only the lane's own tickets run.
+function InLane($t) { -not $Lane -or $t.File -like "$Tracker/$Lane/issues/*" }
 function NextTicket {
   $all = AllTickets
   $done = $all | Where-Object Stage -eq 'done' | ForEach-Object Id
-  $r = $all | Where-Object Stage -eq 'to-review' | Select-Object -First 1
+  $mine = @($all | Where-Object { InLane $_ })
+  $r = $mine | Where-Object Stage -eq 'to-review' | Select-Object -First 1
   if ($r) { return $r }
-  $all | Where-Object { $_.Stage -eq 'to-implement' -and -not ($_.BlockedBy | Where-Object { $_ -notin $done }) } | Select-Object -First 1
+  $mine | Where-Object { $_.Stage -eq 'to-implement' -and -not ($_.BlockedBy | Where-Object { $_ -notin $done }) } | Select-Object -First 1
 }
 
 # --- one fresh CLI session -------------------------------------------------------
@@ -521,8 +539,8 @@ function Walk($t, $depth, $open, $seen) {
 }
 function ShowTree($label) {
   $all = AllTickets
-  $open = @($all | Where-Object Stage -ne 'done')
-  if (-not $open) { Write-Host "`n${label}: nothing left."; return }
+  $open = @($all | Where-Object { $_.Stage -ne 'done' -and (InLane $_) })
+  if (-not $open) { Write-Host "`n${label}: nothing left$(if ($Lane) { " in lane $Lane" })."; return }
   $doneIds = $all | Where-Object Stage -eq 'done' | ForEach-Object Id
   $seen = @{}
   Write-Host ("`n{0} -- {1} open, indented under what blocks them:" -f $label, $open.Count)

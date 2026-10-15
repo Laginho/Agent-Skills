@@ -206,5 +206,34 @@ Check 'gate runner records actual exit and invalidates reused evidence on failur
     Assert ($changedExit -ne 0 -and -not (Test-Path $receipt)) 'Gate attributed evidence after moving HEAD'
   } finally { Pop-Location }
 }
+Check 'lanes keep to their own folder and session' {
+  Fixture lanes; Push-Location $Repo
+  try {
+    $origin = Join-Path $root 'lanes-origin.git'; GitOk init -q --bare -b main $origin
+    New-Item -ItemType Directory "$Repo/.scratch/other/issues" -Force | Out-Null
+    $other = "$Repo/.scratch/other/issues/O-1.md"
+    WriteTicket L-1 to-implement; [IO.File]::WriteAllText($other, "# O-1: Other`nStage: to-implement`nBlocked by: none`n")
+    GitOk add .; GitOk commit -qm base; GitOk remote add origin $origin; GitOk push -q -u origin main
+    # The other lane is mid-run: its own session and a pushed ticket branch at `implementing`.
+    GitOk checkout -qb sweatshop/other/2026-01-01-0000; GitOk commit -q --allow-empty -m 'open other'; GitOk push -q -u origin HEAD
+    GitOk checkout -qb o-1; [IO.File]::WriteAllText($other, "# O-1: Other`nStage: implementing`nBlocked by: none`n")
+    GitOk commit -qam claim; GitOk push -q -u origin HEAD; GitOk checkout -q main
+    $script:Lane = 'feature'; $script:Loop = 'main'
+    $s = @(Use-Session)[-1]
+    Assert ($s -like 'sweatshop/feature/*') "Lane session named $s"
+    $script:Loop = $s
+    NoneInflight
+    Assert ((NextTicket).Id -eq 'L-1') 'Lane ran outside its folder'
+    $script:Lane = 'other'; $script:Loop = 'main'; GitOk checkout -q main
+    Assert (@(Use-Session)[-1] -eq 'sweatshop/other/2026-01-01-0000') 'Lane did not resume its own session'
+    $script:Lane = $null; GitOk checkout -q main
+    $refused = try { Use-Session; '' } catch { "$_" }
+    Assert ($refused -match 'Lane sessions are open') "Run without a lane took a lane session: $refused"
+    GitOk checkout -qb sweatshop/2026-01-01-0000; GitOk commit -q --allow-empty -m 'open lane-less'; GitOk checkout -q main
+    $script:Lane = 'feature'
+    $refused = try { Use-Session; '' } catch { "$_" }
+    Assert ($refused -match 'A session without a lane is open') "Lane ran beside a lane-less session: $refused"
+  } finally { $script:Lane = $null; Pop-Location }
+}
 Write-Host "$checks checks; $($failures.Count) failures. Fixtures: $root"
 if ($failures) { throw ($failures -join "`n") }

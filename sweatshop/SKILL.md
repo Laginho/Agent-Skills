@@ -27,6 +27,7 @@ no instructions of its own.** Everything a session does, it does because
    the base and pushed. It is checked out, and from here it is the loop's base:
    stage 2 branches from it, stage 3 merges into it. Every session `ticket-flow`
    spawns finds it the same way, by name, so the driver never has to say so.
+   With `-Lane`, only `sweatshop/<lane>/*` counts (see Lanes).
 4. **Runs tickets** until nothing is runnable: `to-review` first, then any
    `to-implement` whose `Blocked by` are all `done` — `done` on the session, so
    dependents start on top of what they depend on, no human merge in between.
@@ -183,9 +184,36 @@ and show where its output lands. These are the corresponding commands:
     & "<skills-dir>\sweatshop\scripts\sweatshop.ps1" "<repo>" -Lineup night
     & "<skills-dir>\sweatshop\scripts\sweatshop.ps1" "<repo>" -Models 'stage 2 gpt-6-luna max, stage 3 opus-5.5 high'
     & "<skills-dir>\sweatshop\scripts\sweatshop-codex.ps1" "<repo>"
+    & "<skills-dir>\sweatshop\scripts\sweatshop.ps1" "<repo>\.artifacts-build\lanes\flutter" -Lane flutter
 
-Runs on different repos can go in parallel, one session each; a second run on a
-repo that already has one is refused.
+Runs on different repos can go in parallel, one session each. On one repo,
+parallel runs are lanes.
+
+## Lanes
+
+`-Lane <folder>` names a tracker folder (`<tracker>/<folder>/issues`). The run
+takes only that folder's tickets, on its own session `sweatshop/<folder>/<stamp>`
+with its own PR. Blockers count as `done` from any folder, but only on the lane's
+session: a ticket blocked by another lane's ticket waits until that lane's PR is
+merged and this lane starts a new session.
+
+- **One clone per lane**, of the same origin, made once and reused, in an ignored
+  folder inside the repo, plus whatever the gate needs installed. For EasyMath:
+  `git clone <origin url> .artifacts-build/lanes/<folder>`, then
+  `npm --prefix app ci`. Pass the clone as `<repo>`. Two drivers on one checkout
+  are refused, so the clone is what lets lanes share a repo. Its run log stays in
+  the clone; the foreman merges it.
+- **The clone starts from origin.** Push the base before starting lanes, or
+  tickets committed only on the local base are missing.
+- **Lanes and lane-less runs never share a repo.** A run without `-Lane` refuses
+  while a lane session is open, and a lane refuses while a session without a lane
+  is open.
+- **Lanes must not edit the same files.** If they do, their PRs conflict in the
+  base. Choosing lanes is planning, not the driver's job; one lane runs its
+  tickets one at a time, so a chain that must stay serial stays in one lane.
+
+ticket-flow sessions take the open session that is an ancestor of HEAD
+(ticket-flow, Dispatch), so lanes need nothing else from them.
 
 Run it in a background terminal/session: a foreground tool call can time out
 before a stage ends. Say where the output lands and end the turn. Do not poll
