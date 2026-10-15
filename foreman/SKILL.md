@@ -21,7 +21,8 @@ checkout, and two lanes resolving `.scratch/` there would share one notes file. 
 standup refusals look at the lane only: a ticket at `implementing` in another
 folder is another lane's run. `.artifacts-build/` is ignored, so a clean
 `git status` on the main checkout says nothing about lanes running. Start every
-chat line and push notification with the lane's name.
+chat line and push notification with the lane's name. Which lane can start
+next is `scout`'s question, not yours.
 
 ## 1. Standup, then launch
 
