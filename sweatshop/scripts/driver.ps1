@@ -146,7 +146,7 @@ $GateCmd = ($Gate -split ' ')[0]
 # was denied while `Bash(npx:*)` ran. The same prefixes again for the PowerShell tool:
 # measured 2026-10-02, sonnet-5.5 on Windows ran the gate through it, every call was
 # denied, and SYN-019 burned an attempt asking for approval in 2 minutes.
-$Allowed = (@('git', 'gh', $GateCmd, 'npx', 'node', 'powershell') | ForEach-Object { "Bash(${_}:*)"; "PowerShell(${_}:*)" }) + ('Read', 'Edit', 'Write', 'Glob', 'Grep', 'Agent') | ForEach-Object { "`"$_`"" }
+$Allowed = (@('git', 'gh', $GateCmd, 'npx', 'node', 'powershell', 'flutter', 'dart') | ForEach-Object { "Bash(${_}:*)"; "PowerShell(${_}:*)" }) + ('Read', 'Edit', 'Write', 'Glob', 'Grep', 'Agent') | ForEach-Object { "`"$_`"" }
 $Allowed = $Allowed -join ' '
 
 # --- local-only files (never dirty the tree) -----------------------------------
