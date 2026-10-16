@@ -420,22 +420,39 @@ attended or not.
 1. **Spawn it** with the ticket id, the question as you would have written it
    under `## Comments`, and the evidence you gathered (measurements, the options
    you tried). It answers `Decision: …` or `Escalate: …` on its first line.
-2. **`Decision`**: record it under `## Comments` as `Proxy decided: <answer> —
-   <its reason, one line>`. When the answer changes the contract, fold it into
+2. **`Decision`**: record it under `## Comments` as `Proxy decided (<who>):
+   <answer> — <its reason, one line>`, where `<who>` names the model that
+   answered: `opus` for the card, `gpt-6-astra high, fallback` for item 4's
+   fallback. When the answer changes the contract, fold it into
    the body the way stage 1 would (Primary files, a criterion, a filled blank).
    Commit both with the next commit of the stage, then carry on as if the human
    had answered.
 3. **`Escalate`**: the old path. `Stage: blocked`, the question and
-   `Proxy escalated: <why>` under `## Comments`, commit, stop.
-4. **No card, or a runtime that cannot spawn one** (Codex): the old path, with
-   no proxy line.
+   `Proxy escalated (<who>): <why>` under `## Comments`, commit, stop.
+4. **No card, or a runtime without it** (Codex: it can spawn subagents, but it
+   does not read `~/.claude/agents/`, so the proxy card is not there). The
+   stage never decides with its own inherited model; it tries, in order:
+   1. **Claude**: `claude -p` with the text of `~/.claude/agents/proxy.md` as
+      the system prompt and the question plus evidence (ticket id, criterion,
+      the `## Comments` excerpt, the attempt's branch) as the prompt. Record as
+      `(opus)`. Failure from sandbox, network, credentials or a refused
+      escalation goes to 2.
+   2. **GPT-6 Astra high fallback**: spawn a subagent with model `gpt-6-astra`
+      and effort `high`, both set explicitly (never inherit the stage's model),
+      with the full text of `proxy.md` in its prompt (Codex does not read it on
+      its own) and the same question plus evidence. Record as
+      `(gpt-6-astra high, fallback)`. No subagent can be created: go to 3.
+   3. **The old path**: stop and ask, with no proxy line.
 
 **Only an actual proxy answer earns `Proxy decided`.** The proxy is read-only
 and returns decision/draft text. The caller owns repository edits and commits,
 including copying that answer with its reason and attribution. A session's own judgement goes under
 `## Comments` in its own voice, and a session without a proxy asks by stopping.
+A decision made by the stage's own model, even through a subagent that
+inherited it, is not a proxy answer and never gets a proxy line.
 Measured 2026-09-30: a Codex stage 2 (PHY-43) wrote two `Proxy decided` lines
-for decisions no proxy had made.
+for decisions no proxy had made. Measured 2026-10-15: a Codex stage 2
+(CONT-014) wrote two through a `/root/proxy` subagent on the stage's model.
 
 The proxy escalates only when there is no way forward without the human, or a
 wrong answer is irreversible or expensive to undo. Stage 3 names every `Proxy

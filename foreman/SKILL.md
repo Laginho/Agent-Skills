@@ -163,8 +163,8 @@ and the stage's `.txt`, plus the branch the driver kept for the attempt
 (`recovery/asked/<when>/<ID>`, or a legacy `<branch>-asked-<when>`, named in the `Attempt N stopped to ask` line), so the
 answer can say "resume from it" instead of starting over. Follow
 `ticket-flow`'s "Asking the proxy": record
-`Proxy decided` (folded into the body when it changes the contract) and set
-`to-implement`, or record `Proxy escalated`. Commit on the session branch, then
+`Proxy decided (opus)` (folded into the body when it changes the contract) and set
+`to-implement`, or record `Proxy escalated (opus)`. Commit on the session branch, then
 relaunch the driver once the run is over. A relaunch for proxy answers is not
 the one restart of section 3.
 
@@ -221,12 +221,17 @@ check from product goals, not another entire ticket review or full gate run.
   **Codex quota**).
   Link the report's PDF when there is one, with its two commits (section 7,
   **Record**).
-- **Foreman** — restarts, cleanups, every `Proxy decided` line, anything you
-  noticed and left alone. Record interventions once in `<tracker>/interventions.md`:
+- **Foreman** — restarts, cleanups, every `Proxy decided` line grouped by who
+  decided (`opus`, `gpt-6-astra high, fallback`; a line without `(<who>)` is
+  legacy, unknown), anything you noticed and left alone. A proxy line written by
+  the stage's own model (ticket-flow, "Asking the proxy") is not a proxy
+  decision: list it apart, as the stage's judgement. Record interventions once in `<tracker>/interventions.md`:
   `| When | Ticket | Kind | Evidence |`, with an ISO timestamp, ticket id or `-`,
   and a link to the note/commit. Kind is `human-rescue` (unplanned human work to
   unblock execution), `routine-approval` (the intended merge/release decision),
-  `proxy-decision`, or `automatic-recovery`. A routine approval is not a rescue.
+  `proxy-decision`, or `automatic-recovery`. A `proxy-decision` Evidence starts
+  with the line's head, `Proxy decided (<who>)`, so the scoreboard can separate
+  them. A routine approval is not a rescue.
   Commit this record with the attribution. Older missing records are unknown.
 - **Your turn** — one line per action only the human can take: this ticket
   needs your decision (quote the question from `## Comments`), this PR needs your
@@ -353,7 +358,8 @@ across runs. Fewer than three: the summary is enough.
   went and what was wasted, comparison with the previous runs from `run-log.md`,
   observations per model, driver and runtime issues, numbered recommendations,
   every `Débito humano:` line of the run, and every `Proxy decided` line of the
-  run's tickets, quoted per ticket. Those are the calls made on the human's
+  run's tickets, quoted per ticket with who decided (Opus, the GPT-6 Astra
+  fallback, or legacy unknown). Those are the calls made on the human's
   behalf; a count without the text sends them hunting through the tickets.
 - **What was done:** right after the summary, one short paragraph per ticket the
   run worked on, for a reader who never opened the tickets (a ticket's title and

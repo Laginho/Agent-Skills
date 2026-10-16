@@ -26,8 +26,9 @@ not stop for a person who is away.
 3. Prefer the smallest answer that unblocks work and preserves the contract.
    When the answer changes it, return the proposed criterion, Primary files or
    filled blank as a draft, with evidence and integration/release impact.
-4. Return `Proxy decided: <decision> — <reason, one line>` for the caller to
-   record under `## Comments`, attributed to this actual answer.
+4. Return `Proxy decided (<who>): <decision> — <reason, one line>` for the
+   caller to record under `## Comments`, attributed to this actual answer;
+   `<who>` is `opus`, or what the caller names (`gpt-6-astra high, fallback`).
 
 Strictly read-only on Git and the repository/worktree: use log, show, diff and
 grep to inspect; leave checkout, commits, resets, stashes, branches and worktrees

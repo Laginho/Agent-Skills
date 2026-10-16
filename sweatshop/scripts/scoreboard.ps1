@@ -141,7 +141,10 @@ function Interventions($file) {
   foreach ($line in Get-Content $file -Encoding UTF8) {
     $c = @($line -split '\|' | ForEach-Object { $_.Trim() })
     if ($c.Count -eq 6 -and $c[1] -match '^\d{4}-\d\d-\d\d' -and $c[3] -in 'human-rescue','routine-approval','proxy-decision','automatic-recovery') {
-      [pscustomobject]@{ Kind = $c[3] }
+      $kind = $c[3]
+      # Opus and the GPT-6 Astra fallback decide differently; legacy lines name no one.
+      if ($kind -eq 'proxy-decision') { $kind += if ($c[4] -match 'Proxy (?:decided|escalated) \(([^)]+)\)') { " ($($Matches[1]))" } else { ' (unknown)' } }
+      [pscustomobject]@{ Kind = $kind }
     }
   }
 }
@@ -204,12 +207,17 @@ if ($SelfCheck) {
   Set-Content -Encoding UTF8 $events @(
     '| When | Ticket | Kind | Evidence |',
     '| 2026-10-03 12:00 | T-1 | human-rescue | notes#1 |',
-    '| 2026-10-03 12:01 | - | routine-approval | release#1 |')
+    '| 2026-10-03 12:01 | - | routine-approval | release#1 |',
+    '| 2026-10-03 12:02 | T-1 | proxy-decision | Proxy decided (opus): x [n](a.md) |',
+    '| 2026-10-03 12:03 | T-1 | proxy-decision | Proxy decided (gpt-6-astra high, fallback): x |',
+    '| 2026-10-03 12:04 | T-2 | proxy-decision | Proxy decided: x |')
   $interventions = @(Interventions $events)
   $evidence = (RenderEvidence $timed @($found + $extra) $interventions) -join "`n"
   if ($evidence -notmatch '\| release-audit \| 1 \| 0 / 0 \| 0 / 0 \|' -or
       $evidence -notmatch '\| post-release \| 1 \| 0 / 0 \| 1 / 1 \|' -or
-      $evidence -notmatch '\| human-rescue \| 1 \|' -or $evidence -notmatch '1.250s total') { throw "Evidence aggregation: $evidence" }
+      $evidence -notmatch '\| human-rescue \| 1 \|' -or $evidence -notmatch '1.250s total' -or
+      $evidence -notmatch '\| proxy-decision \(opus\) \| 1 \|' -or $evidence -notmatch '\| proxy-decision \(gpt-6-astra high, fallback\) \| 1 \|' -or
+      $evidence -notmatch '\| proxy-decision \(unknown\) \| 1 \|') { throw "Evidence aggregation: $evidence" }
   $nothing, $externalPairs = Score @() @($extra | Where-Object Discovery -ne 'ticket-review')
   if ($externalPairs.Count) { throw 'Post-approval findings changed reopening rates' }
   Remove-Item -LiteralPath $tmp, $att, $events
