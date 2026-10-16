@@ -464,8 +464,33 @@ function StopAsked {
   Remove-Item $f; Say 'STOP file found; stopping between stages.'; $script:Stopped = $true; $true
 }
 
+# A stage may check the ticket's branch out in its own worktree (`.artifacts-build/<id>`).
+# Left there, it holds the branch: `branch -D` fails and the next attempt reads the
+# stale `implementing`. Measured 2026-10-16: CLEAN-033 retry ended the run that way.
+function Remove-TicketWorktrees($t) {
+  $path = $null
+  foreach ($line in @(GitOk worktree list --porcelain)) {
+    if ($line -like 'worktree *') { $path = $line.Substring(9) }
+    elseif ($line -eq "branch refs/heads/$($t.Branch)" -and $path -and
+            [IO.Path]::GetFullPath($path).TrimEnd('\', '/') -ne $Repo.TrimEnd('\', '/')) {
+      if (GitOk -C $path status --porcelain) {
+        $stamp = [guid]::NewGuid().ToString('N')
+        GitOk -C $path stash push --include-untracked -m "sweatshop recovery $stamp" | Out-Null
+        $head = GitOk -C $path rev-parse 'stash@{0}'
+        GitOk update-ref "refs/sweatshop-recovery/$stamp" $head
+        $record = "refs/sweatshop-recovery/$stamp $head; ticket $($t.Id) worktree $path; log $script:LastLog"
+        Add-Content -Encoding UTF8 (Join-Path $RunDir 'recovery.txt') $record
+        Say "Saved recovery: $record"
+      }
+      GitOk worktree remove --force $path | Out-Null
+      Say "$($t.Id): removed worktree $path"
+    }
+  }
+}
+
 # Back to a clean loop base (the session); drop the ticket's branch if asked.
 function Reset-Tree($t, [switch]$DropBranch) {
+  if ($t) { Remove-TicketWorktrees $t }
   # Save before checkout -f/clean, including untracked files and committed attempts.
   if ((GitOk status --porcelain) -or $DropBranch) {
     $stamp = [guid]::NewGuid().ToString('N')

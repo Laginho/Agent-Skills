@@ -235,5 +235,22 @@ Check 'lanes keep to their own folder and session' {
     Assert ($refused -match 'A session without a lane is open') "Lane ran beside a lane-less session: $refused"
   } finally { $script:Lane = $null; Pop-Location }
 }
+Check 'retry drops a ticket branch held by a leftover stage worktree and keeps its work' {
+  Fixture worktree; Push-Location $Repo
+  try {
+    WriteTicket T-1 to-implement; StartSession
+    $script:RunDir = Join-Path $root 'worktree-run'; New-Item -ItemType Directory $RunDir -Force | Out-Null
+    $wt = Join-Path $root 'worktree-T-1'
+    GitOk worktree add -q -b t-1 $wt $Loop
+    [IO.File]::WriteAllText("$wt/attempt.txt", 'uncommitted attempt')
+    Reset-Tree ([pscustomobject]@{ Id = 'T-1'; Branch = 't-1' }) -DropBranch
+    Assert (-not (Test-Path $wt)) 'Leftover worktree survived the reset'
+    Assert (-not (git branch --list t-1)) 'Ticket branch survived, so the retry reads a stale stage'
+    $saved = (Get-Content (Join-Path $RunDir 'recovery.txt')) -match 'worktree'
+    Assert $saved 'Worktree recovery not recorded'
+    $ref = ($saved[0] -split ' ')[0]
+    Assert ((GitOk show "${ref}^3:attempt.txt") -eq 'uncommitted attempt') 'Uncommitted worktree work lost'
+  } finally { Pop-Location }
+}
 Write-Host "$checks checks; $($failures.Count) failures. Fixtures: $root"
 if ($failures) { throw ($failures -join "`n") }
