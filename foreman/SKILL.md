@@ -147,7 +147,7 @@ weekly reset) still stops it.
 ## 4. Hands off
 
 The human's calls stay the human's: questions the proxy escalated, the session
-PR merge, any edit to code on the session branch. An edit you would have made is
+PR merge, any edit to code on the session branch other than section 9's sync. An edit you would have made is
 a line in the summary, not a commit. Subagents: only the proxy.
 
 **Push only the session branch and the base.** Never push a ticket branch, even
@@ -434,4 +434,35 @@ the binding's commands, render the PNGs, read each published page first (the
 human edits them), replace its image, and fetch it again to confirm. Commit the
 regenerated tracked files on the base and push, as a record. Without a tool for
 the pages, leave the PNGs and say where they are.
+
+## 9. Sync with the base (lanes)
+
+Another lane merged after this session opened leaves this lane's PR behind the
+base, maybe in conflict, and its green check tested the session without the
+other lane's code. Sync at the end of every lane run, as the last commit before
+the chat summary (the run's records are on the base by then, so the base's side
+of a record already holds this lane's rows), and again whenever the human says
+another lane merged. Never while a driver runs on the clone. In the clone:
+
+1. `git fetch`, switch to the session, `git pull --ff-only`. Done when
+   `git merge-base --is-ancestor origin/<base> HEAD` succeeds.
+2. `git merge --no-commit --no-ff origin/<base>`.
+3. Resolve each conflict:
+   - Section 5 and 7 records and section 8's roadmap files: take the base's side
+     (`git checkout --theirs -- <file>`), never merge those tables by hand.
+   - Code and tickets: keep both sides' intent. Read the ticket behind each side:
+     this lane's on the session, the other's from `git log origin/<base> -- <file>`.
+   - Sides that contradict (one removes or rewrites what the other relies on) are a
+     contract call: ask the proxy as in section 4, with both tickets and the hunk.
+     Escalated: `git merge --abort` and a **Your turn** line with the question.
+4. Run the repo's gate on the uncommitted merge. Red: `git merge --abort` and a
+   **Your turn** line with the failing test and both tickets; a fix is new code,
+   which goes in a ticket, never in the sync. Green: commit
+   `Merge <base> into <session>` and push the session branch.
+5. `gh pr comment` on the session PR: the base commit merged, each file resolved
+   by hand with one line on how, any proxy decision. The human reviews those
+   hunks before merging. One line in the notes file; leave the clone on the base.
+
+With lanes, the summary's **Your turn** ends with "after merging this PR, tell
+the other open lanes' foremen to sync".
 

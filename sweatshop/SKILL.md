@@ -63,7 +63,8 @@ way `ticket-flow` already says (`Stage: to-implement`, ❌ on the criterion). An
 edit big enough to matter is a `CLEAN-*` ticket, not a retrofit.
 
 The base moving while a session is open is not the driver's problem: the session
-meets it in the PR, and a conflict there is the human's call.
+meets it in the PR. With lanes, the foreman syncs the session with the base
+(`foreman`, section 9); what the sync cannot resolve is the human's call.
 
 ## What the driver writes
 
@@ -208,8 +209,8 @@ merged and this lane starts a new session.
 - **Lanes and lane-less runs never share a repo.** A run without `-Lane` refuses
   while a lane session is open, and a lane refuses while a session without a lane
   is open.
-- **Lanes must not edit the same files.** If they do, their PRs conflict in the
-  base. Choosing lanes is planning, not the driver's job; one lane runs its
+- **Lanes should not edit the same files.** If they do, the later PR conflicts
+  with the base; the foreman's sync resolves it or hands it to the human. Choosing lanes is planning, not the driver's job; one lane runs its
   tickets one at a time, so a chain that must stay serial stays in one lane.
 
 ticket-flow sessions take the open session that is an ancestor of HEAD
