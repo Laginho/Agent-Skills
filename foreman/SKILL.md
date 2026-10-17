@@ -1,6 +1,6 @@
 ---
 name: foreman
-description: Runs a sweatshop run with someone watching — launches the driver as a detached process, reads each finished stage, sends a heartbeat every 30 minutes, cleans up after a crash, and hands the human a summary at the end. Use when asked to "run the foreman", "supervise the sweatshop", "babysit the loop", or with /foreman.
+description: Runs a sweatshop run (or up to three lanes) with someone watching — launches the driver as a detached process, reads each finished stage, sends a heartbeat every 30 minutes, cleans up after a crash, and hands the human a summary at the end. Use when asked to "run the foreman", "supervise the sweatshop", "babysit the loop", or with /foreman.
 ---
 
 # Foreman
@@ -12,9 +12,15 @@ loop and `ticket-flow` still owns every stage; you own the watching. Read
 
 Language follows `standup`'s rule.
 
-**Lanes** (`sweatshop/SKILL.md`, Lanes): one foreman per lane, each in its own
-session, with the lane's clone as `<repo>` and `-Lane <folder>` among the flags.
-Everything below is per lane; make the clone first when it is missing, then
+**Lanes** (`sweatshop/SKILL.md`, Lanes): one foreman session watches up to
+three lanes; split more across sessions, since every lane's stage reads fill the
+same context. Each lane has its clone as `<repo>` and `-Lane <folder>` among the
+flags. Everything below is per lane (notes file, watch, standup refusals,
+summary, report, sync) except the clock: one check-in covers every lane, a line
+each, and one watch loop polls every lane and exits on the first new line,
+naming its lane. A lane that finishes gets sections 5 to 9 while the others keep
+running; when the human merges one lane's PR, sync each other open lane
+(section 9) once its driver stops. Make the clone first when it is missing, then
 `<clone>/<tracker>/run-log/` before redirecting into it. `<tracker>` below is
 the clone's, as an absolute path: the session's own folder stays the main
 checkout, and two lanes resolving `.scratch/` there would share one notes file. The
@@ -48,6 +54,14 @@ is this run. In Claude Code, the check-in clock is a background Bash
 `sleep 1800` that you re-arm on every wake: its completion notice always wakes
 you. Not `/loop` or a cron job: measured 2026-09-24, one never fired and nobody
 noticed for 30 minutes. In Codex, use a 30-minute thread heartbeat.
+
+**A driver already running** (the human or another session launched it before
+asking for you) is adopted, never relaunched: the standup's `implementing` ticket
+is its stage, not a dead run. With no `.out` to poll, watch `<tracker>/run-log/`
+for a new `<id>-<stage>-<when>.row.txt`, which the driver writes when each stage
+ends. Its `throw` lands in the terminal it runs in: a check-in that finds no
+growing stage `.txt` and no new row asks the human to look there. Note in the
+notes file that the driver is adopted and where it runs.
 
 **Keep notes in a file**, `<tracker>/run-log/foreman-notes.md` (excluded with the
 rest of `run-log/`): one timestamped line per launch, stage row, cleanup, proxy
@@ -104,6 +118,28 @@ Every check-in reports, even when nothing moved: "Still implementing C, 12 min
 in, nothing new" is the report. It goes in chat and as a push notification,
 because the human is often away from the screen. The beep stays for trouble
 only.
+
+**Live panel**, when `AGENTS.md` has a `Painel` binding (a claude.ai artifact
+URL): the page the human follows the run on, one card per lane. Write it with
+`ArtifactData`, document `lanes/<lane>`, a whole-document `set` pinned with
+`if_version` to the version you last read:
+
+    { "session": "<session branch>", "driver": "running|finished|stopped|crashed",
+      "current": null | { "id": "", "title": "", "stage": "specify|implement|review",
+                          "model": "", "startedAt": "<ISO, with offset>", "limitMin": 45 },
+      "tickets": [ { "id": "", "title": "", "state": "done|running|ready|waiting|blocked|human", "note": "" } ],
+      "events": [ { "at": "<ISO>", "text": "" } ],
+      "pr": "<github url> or null", "needsHuman": "<what waits on the human> or null",
+      "updatedAt": "<ISO>" }
+
+Write it at launch or adoption, at every finished stage, at every check-in and at
+the end (`driver` finished or crashed, `current` null, `pr` set). A finished
+stage's write also sets `current` to the stage the driver started right after
+it (its newest stage `.txt`), so the card never reads "between stages" while
+one runs; this costs no extra wake. Keep the last 8 events, one short line each.
+At launch, delete the documents of lanes whose `driver` is not `running`: a past
+run's lane would read as this run's. A pinned write that fails: re-read and
+redo. Failing twice: a line in the notes and go on; the panel never stops a run.
 
 ## 3. Crash
 
