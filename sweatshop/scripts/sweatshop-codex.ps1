@@ -5,8 +5,8 @@
 param(
   [Parameter(Mandatory, Position=0)][string]$Repo,
   [string]$Tracker = '.scratch',
-  [int]$ImplementMinutes = 45,
-  [int]$ReviewMinutes = 20,
+  [int]$ImplementMinutes = 60,
+  [int]$ReviewMinutes = 60,
   [switch]$DryRun,
   [switch]$SelfCheck,
   [string]$Lane

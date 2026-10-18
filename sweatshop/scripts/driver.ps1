@@ -13,9 +13,8 @@
 param(
   [Parameter(Mandatory)][string]$Repo,
   [string]$Tracker = '.scratch',
-  [int]$ImplementMinutes = 45,
-  # 0: 40 for a `max` reviewer, else 20 (set after the lineup is read).
-  [int]$ReviewMinutes = 0,
+  [int]$ImplementMinutes = 60,
+  [int]$ReviewMinutes = 60,
   [switch]$DryRun,
   [switch]$SelfCheck,
   # The `Models (<name>):` line to run. Absent: `Models (Claude):`, else the legacy `Models:`.
@@ -95,9 +94,9 @@ $Model2, $Effort2 = StageModel $line 2
 $Model3, $Effort3 = StageModel $line 3
 # Only the implementer changes for a hard ticket: the reviewer has to be good enough for all of them.
 $ModelHard, $EffortHard = StageModel $line 'hard'
-# Measured 2026-10-01: gpt-6.1-sol max took 8-15 min per review, and PHY-48's first
-# review hit the 20-minute ceiling ready to merge; the stage was thrown away.
-if (-not $ReviewMinutes) { $ReviewMinutes = if ($Effort3 -eq 'max') { 40 } else { 20 } }
+# The limits catch a hung session, not a slow one. Measured 2026-10-17: with four lanes a
+# review that commits a fix reruns a 9-15 min gate, and five such reviews died at 20 min;
+# implements reached 44-45 of 45 min.
 if (-not ($Gate -and $Base -and $Model2 -and $Model3)) { throw "Bindings block incomplete for lineup '$LineupName' (Gate, Base branch, stage 2 and 3 models):`n$(if ($Models) { $Models } else { $block })" }
 # An unversioned alias moves when Anthropic ships the next model, and the lineup
 # changes under a run with nobody told. Pin it.
