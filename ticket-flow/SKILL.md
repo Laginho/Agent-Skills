@@ -431,7 +431,9 @@ attended or not.
    `Proxy escalated (<who>): <why>` under `## Comments`, commit, stop.
 4. **No card, or a runtime without it** (Codex: it can spawn subagents, but it
    does not read `~/.claude/agents/`, so the proxy card is not there). The
-   stage never decides with its own inherited model; it tries, in order:
+   stage never decides with its own inherited model; it tries, in order
+   (a sandboxed Codex stage starts at 2: its sandbox has no network, so
+   `claude -p` only burns minutes on ECONNREFUSED):
    1. **Claude**: `claude -p` with the text of `~/.claude/agents/proxy.md` as
       the system prompt and the question plus evidence (ticket id, criterion,
       the `## Comments` excerpt, the attempt's branch) as the prompt. Record as
