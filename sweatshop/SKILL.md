@@ -82,6 +82,8 @@ meets it in the PR. With lanes, the foreman syncs the session with the base
   tokens only; the driver prices them from `$CodexPrices` in the script, at
   short-context rates, so a long-context stage reads low. A model missing from
   that table logs `?`, never a guess: add its row from OpenAI's pricing page.
+  From 2026-10-20 a Codex stage's cost includes its subagent rollouts, and a
+  stage killed by time is priced from its rollout as a lower bound.
 - `<tracker>/run-log/<id>-<stage>-<when>.txt`: the session's full output (for
   Claude, its JSON result). `.final` beside it holds the session's last message.
 - Beside each stage log: `.runtime.json` records start, observed runtime completion,

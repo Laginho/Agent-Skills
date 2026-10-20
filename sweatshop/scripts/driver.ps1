@@ -386,6 +386,25 @@ $CodexPrices = @{
 }
 # Not Measure-Object: a field an older CLI does not emit is an error there, a 0 here.
 function Sum($objs, $name) { $s = 0.0; foreach ($o in $objs) { $s += [double]$o.$name }; $s }
+# Codex keeps one rollout per thread under $CODEX_HOME/sessions, named by the thread id (codex-quota.ps1 reads the same name).
+function CodexRollouts {
+  $home_ = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOME '.codex' }
+  Get-ChildItem (Join-Path $home_ 'sessions') -Recurse -Filter 'rollout-*.jsonl' -ErrorAction SilentlyContinue | ForEach-Object {
+    $id = [regex]::Match($_.Name, '([0-9a-f]{8}-[0-9a-f-]{27})\.jsonl$').Groups[1].Value
+    # A subagent's first line names its parent thread; a root thread's does not.
+    if ($id) { try { $meta = Get-Content -LiteralPath $_.FullName -TotalCount 1 } catch { $meta = '' }
+      [pscustomobject]@{ Thread = $id; File = $_.FullName; Parent = [regex]::Match("$meta", '"thread_spawn":\{"parent_thread_id":"([^"]+)"').Groups[1].Value } }
+  }
+}
+# The last token_count that carries info is the thread's running total; info is null on rate-limit-only events.
+function RolloutUsage($file) {
+  $lines = (Read-StageLog $file) -split "`n"
+  for ($i = $lines.Count - 1; $i -ge 0; $i--) {
+    if ($lines[$i] -notlike '*"token_count"*') { continue }
+    try { $e = $lines[$i] | ConvertFrom-Json } catch { continue }
+    if ($e.type -eq 'event_msg' -and $e.payload.info) { return $e.payload.info.total_token_usage }
+  }
+}
 function Usage($log, $model) {
   $text = (Read-StageLog $log)
   if ((RuntimeOf $model) -eq 'Claude') {
@@ -398,6 +417,19 @@ function Usage($log, $model) {
   $u = @(foreach ($l in $text -split "`n") {
     if ($l -like '*turn.completed*') { try { $e = $l | ConvertFrom-Json; if ($e.type -eq 'turn.completed') { $e.usage } } catch { } }
   })
+  # A stage killed by time has no turn.completed: its own rollout is the record. Subagent rollouts
+  # (any depth) bill to the stage either way; they add tokens, so pricing the sum is pricing each one.
+  $tid = [regex]::Match($text, '"thread_id":"([^"]+)"').Groups[1].Value
+  if ($tid) {
+    $rollouts = @(CodexRollouts)
+    if (-not $u) { $u = @($rollouts | Where-Object { $_.Thread -eq $tid } | ForEach-Object { RolloutUsage $_.File }) }
+    $threads = @($tid)
+    for ($i = 0; $i -lt $threads.Count; $i++) {
+      foreach ($kid in @($rollouts | Where-Object { $_.Parent -eq $threads[$i] -and $threads -notcontains $_.Thread })) {
+        $threads += $kid.Thread; $u += @(RolloutUsage $kid.File)
+      }
+    }
+  }
   if (-not $u) { return $null }
   # OpenAI counts cached and cache-write tokens inside input_tokens; reasoning inside output_tokens.
   $in = Sum $u 'input_tokens'; $cached = Sum $u 'cached_input_tokens'; $write = Sum $u 'cache_write_input_tokens'; $out = Sum $u 'output_tokens'
@@ -737,6 +769,36 @@ if ($SelfCheck) {
   if ((UsageCells (Usage $tmp 'gpt-unpriced'))[1] -ne '?') { throw 'Usage: unpriced model must read ?' }
   if ((UsageCells (Usage $tmp 'gpt-6-luna-fast'))[1] -ne '$0.320') { throw 'Usage: fast must bill twice the base' }
   Remove-Item $tmp
+  # Killed stage (no turn.completed) priced from its rollout; subagent rollouts at any depth add to it.
+  $codexHome = Join-Path $env:TEMP ('sweatshop-codexhome-' + [guid]::NewGuid().ToString('N'))
+  $savedHome = $env:CODEX_HOME; $env:CODEX_HOME = $codexHome
+  try {
+    $day = Join-Path $codexHome 'sessions\2026\10\20'; New-Item -ItemType Directory -Force $day | Out-Null
+    $tok = { param($in, $out) @{ type = 'event_msg'; payload = @{ type = 'token_count'; info = @{ total_token_usage = @{ input_tokens = $in; cached_input_tokens = 0; cache_write_input_tokens = 0; output_tokens = $out } } } } | ConvertTo-Json -Compress -Depth 9 }
+    $rollout = { param($id, $parent, [string[]]$events)
+      $src = if ($parent) { @{ subagent = @{ thread_spawn = @{ parent_thread_id = $parent } } } } else { 'cli' }
+      $meta = @{ type = 'session_meta'; payload = @{ id = $id; source = $src } } | ConvertTo-Json -Compress -Depth 9
+      [IO.File]::WriteAllLines((Join-Path $day "rollout-2026-10-20T10-00-00-$id.jsonl"), [string[]](@($meta) + $events)) }
+    $root, $kid, $grand, $done, $doneKid = 'aaaaaaaa-0000-7000-8000-000000000001', 'aaaaaaaa-0000-7000-8000-000000000002', 'aaaaaaaa-0000-7000-8000-000000000003', 'aaaaaaaa-0000-7000-8000-000000000004', 'aaaaaaaa-0000-7000-8000-000000000005'
+    # Root: an earlier reading, a rate-limit-only event (info null), then the last total = 1M uncached input = $0.100 on luna.
+    & $rollout $root $null @((& $tok 500000 0), '{"type":"event_msg","payload":{"type":"token_count","info":null}}', (& $tok 1000000 0))
+    & $rollout $kid $root @((& $tok 1000000 0))           # + $0.100
+    & $rollout $grand $kid @((& $tok 0 1000000))           # + $0.500 (output)
+    & $rollout $doneKid $done @((& $tok 1000000 0))        # completed stage's subagent: + $0.100
+    $killed = Join-Path $codexHome 'killed.txt'
+    [IO.File]::WriteAllText($killed, "{`"type`":`"thread.started`",`"thread_id`":`"$root`"}`n{`"type`":`"item.started`"}`n")
+    if ((UsageCells (Usage $killed 'gpt-6-luna'))[1] -ne '$0.700') { throw "Usage: killed stage with subagents $((UsageCells (Usage $killed 'gpt-6-luna'))[1])" }
+    if ((UsageCells (Usage $killed 'gpt-6-luna'))[0] -notmatch '^2\.0M in') { throw 'Usage: killed stage tokens' }
+    $done_ = Join-Path $codexHome 'done.txt'
+    [IO.File]::WriteAllText($done_, "{`"type`":`"thread.started`",`"thread_id`":`"$done`"}`n{`"type`":`"turn.completed`",`"usage`":{`"input_tokens`":2000000,`"cached_input_tokens`":1000000,`"output_tokens`":100000}}`n")
+    # Completed stage: turn.completed $0.160 plus its subagent $0.100.
+    if ((UsageCells (Usage $done_ 'gpt-6-luna'))[1] -ne '$0.260') { throw "Usage: completed stage with subagent $((UsageCells (Usage $done_ 'gpt-6-luna'))[1])" }
+    $none = Join-Path $codexHome 'none.txt'
+    [IO.File]::WriteAllText($none, "{`"type`":`"thread.started`",`"thread_id`":`"ffffffff-0000-7000-8000-000000000009`"}`n")
+    if ((UsageCells (Usage $none 'gpt-6-luna'))[1] -ne '?') { throw 'Usage: killed stage without rollout must read ?' }
+    $env:CODEX_HOME = Join-Path $codexHome 'missing'
+    if ((UsageCells (Usage $killed 'gpt-6-luna'))[1] -ne '?') { throw 'Usage: no CODEX_HOME sessions must read ?' }
+  } finally { $env:CODEX_HOME = $savedHome; Remove-Item -Recurse -Force $codexHome }
   # PrBody's order is what the human reads first: human-review and non-Approve on top.
   $body = PrBody @([pscustomobject]@{ Id = 'A-1'; Review = 'agent'; Verdict = 'Approve' },
                    [pscustomobject]@{ Id = 'A-2'; Review = 'human'; Verdict = 'Approve' },
