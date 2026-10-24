@@ -337,7 +337,8 @@ Commit the code to test, then run the bound gate once in the foreground through
 The helper captures output, actual exit status, log hash and the tested commit.
 Filter that log for counts/errors. Reuse its receipt when code is unchanged;
 rerun only after changing code, never merely to produce paperwork. Append
-`Gate evidence: <absolute JSON path>` to the ticket in the handoff commit.
+`Gate evidence: <absolute JSON path>` to the ticket in the handoff commit, as
+its own line starting with `Gate evidence:`, not a list item or comment bullet.
 Between the tested commit and handoff only this ticket and its feature ledger
 may change; skills, scripts and other documentation invalidate the receipt too.
 The driver checks receipt, log and equality of tested production at `to-review`, `to-merge` and
