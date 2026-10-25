@@ -147,6 +147,13 @@ Check 'gate evidence accepts metadata close but rejects stale skill or script co
     GitOk add .; GitOk commit -qm rewritten
     Assert-GateEvidence $t rewritten
     GitOk checkout -q $Loop
+    # Review notes on another ticket, a new ticket in another feature and its ledger are not production.
+    WriteTicket T-2 to-implement none '- note from T-1 review'
+    New-Item -ItemType Directory "$Repo/.scratch/other/issues" -Force | Out-Null
+    [IO.File]::WriteAllText("$Repo/.scratch/other/issues/CLEAN-1.md", "# CLEAN-1: follow-up`nStage: to-specify`n")
+    [IO.File]::WriteAllText("$Repo/.scratch/other/ledger.md", "- CLEAN-1 opened`n")
+    GitOk add .; GitOk commit -qm notes
+    Assert-GateEvidence $t $Loop
     foreach ($file in 'SKILL.md', 'code.ps1') {
       [IO.File]::WriteAllText("$Repo/$file", 'changed'); GitOk commit -qam changed
       $caught = $false; try { Assert-GateEvidence $t $Loop } catch { $caught = $true }

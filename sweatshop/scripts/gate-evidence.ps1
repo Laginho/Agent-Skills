@@ -20,10 +20,11 @@ function Assert-GateEvidence($ticket, $ref) {
   $ErrorActionPreference = 'Continue'
   & git cat-file -e "$($proof.Code)^{commit}"
   if ($LASTEXITCODE) { throw "$($ticket.Id): tested gate commit is unavailable." }
-  # Only this ticket and its ledger may close after the checked commit. Skills,
-  # scripts and arbitrary documentation remain production and invalidate evidence.
-  $ledger = ($ticket.File -replace '/issues/[^/]+$', '/ledger.md')
-  $changed = @(& git diff --name-only $proof.Code $ref -- . ":(exclude)$($ticket.File)" ":(exclude)$ledger")
+  # Only tracker tickets and feature ledgers may change after the checked commit: review
+  # notes on other tickets and new tickets parked three valid merges on 2026-10-24
+  # (BOT-002, BOT-006, UI-004). Skills, scripts and other documentation remain production.
+  $tracker = $ticket.File -replace '/[^/]+/issues/[^/]+$'
+  $changed = @(& git diff --name-only $proof.Code $ref -- . ":(exclude,glob)$tracker/*/issues/*.md" ":(exclude,glob)$tracker/*/ledger.md")
   if ($LASTEXITCODE -or $changed) { throw "$($ticket.Id): code changed after gate ($($changed -join ', ')); reuse evidence only for identical code." }
 }
 if ($Command) {
