@@ -7,7 +7,7 @@
 
 .EXAMPLE
   .\sweatshop.ps1 D:\Desktop\Projects\SIGAA-ME
-  .\sweatshop.ps1 D:\Desktop\Projects\SIGAA-ME -Lineup night   # the `Models (night):` line
+  .\sweatshop.ps1 D:\Desktop\Projects\SIGAA-ME -Lineup opus   # the `Models (opus):` line
   .\sweatshop.ps1 D:\Desktop\Projects\SIGAA-ME -DryRun     # show what would run
 #>
 param(
@@ -17,7 +17,7 @@ param(
   [int]$ReviewMinutes = 60,
   [switch]$DryRun,
   [switch]$SelfCheck,
-  # The `Models (<name>):` line to run. Absent: `Models (Claude):`, else the legacy `Models:`.
+  # The `Models (<name>):` line to run. Absent: the one `Models (default):` names.
   [string]$Lineup,
   # A lineup for this run only, in the binding's own syntax: 'stage 2 gpt-6-luna max, stage 3 opus-5.5 high'.
   # Never written to the repo: editing the binding would dirty the tree Preflight wants clean.
@@ -83,12 +83,16 @@ function StageModel($line, $n) {
 # What `claude --model` takes: `opus-5.5` is `claude-opus-5-5`. Codex names pass as written.
 function CliModel($model) { if ($model -match '^(gpt-|claude-)') { $model } else { 'claude-' + ($model -replace '\.', '-') } }
 
-# A lineup is one `Models (<name>):` line. Only the default falls back to the
-# legacy `Models:`; a named lineup that is missing is refused, never borrowed.
+# A lineup is one `Models (<name>):` line. `Models (default): <name>` names the
+# lineup a run without -Lineup takes. Only the default falls back to the legacy
+# `Models (Claude):`, then `Models:`; a named lineup that is missing is refused, never borrowed.
 # Not `$models`: PowerShell names are case-blind, and that is the -Models parameter.
 if ($Models -and $Lineup) { throw 'Pass -Lineup or -Models, not both.' }
-$LineupName = if ($Models) { 'ad hoc' } elseif ($Lineup) { $Lineup } else { 'Claude' }
-$line = if ($Models) { $Models } else { [regex]::Match($block, "(?im)^\s*-\s*Models \($([regex]::Escape($LineupName))\):\s*(.+)$").Groups[1].Value }
+function LineupLine($name) { [regex]::Match($block, "(?im)^\s*-\s*Models \($([regex]::Escape($name))\):\s*(.+)$").Groups[1].Value.Trim() }
+$LineupName = if ($Models) { 'ad hoc' } elseif ($Lineup) { $Lineup } else { 'default' }
+$line = if ($Models) { $Models } else { LineupLine $LineupName }
+if ($line -match '^[\w.-]+$') { $LineupName = $line; $line = LineupLine $LineupName }
+if (-not $line -and -not $Lineup -and -not $Models) { $LineupName = 'Claude'; $line = LineupLine 'Claude' }
 if (-not $line -and -not $Lineup -and -not $Models) { $line = [regex]::Match($block, '(?im)^\s*-\s*Models:\s*(.+)$').Groups[1].Value }
 $Model2, $Effort2 = StageModel $line 2
 $Model3, $Effort3 = StageModel $line 3

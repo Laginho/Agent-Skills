@@ -470,12 +470,13 @@ work. Do not copy this skill into the repo — one copy of the standard is the p
 
     - Gate: `<command that runs typecheck + lint + tests>`
     - Base branch: `<name>`
-    - Models: stage 1 <model>, stage 2 <model> [effort], stage 3 <model> [effort]
+    - Models (default): <lineup>
     - Models (<lineup>): stage 2 <model> [effort], hard <model> [effort], stage 3 <model> [effort]
 
-Cada linha `Models` é uma lineup. `Models:` (ou `Models (Claude):`) é a padrão do
-driver; `Models (<nome>):` é escolhida com `-Lineup <nome>`, e `Models (Codex):` é
-a do `sweatshop-codex.ps1`. O runtime segue o modelo, estágio por estágio (`gpt-*`
+Cada linha `Models (<nome>):` é uma lineup, escolhida com `-Lineup <nome>`.
+`Models (default):` não lista modelos: nomeia a lineup que o driver roda sem
+`-Lineup`. O `sweatshop-codex.ps1` roda `-Lineup sol`. Repo sem `default` cai no
+legado `Models (Claude):`, depois `Models:`. O runtime segue o modelo, estágio por estágio (`gpt-*`
 roda no Codex, o resto no Claude Code), então uma lineup pode misturar os dois.
 Modelo Claude sempre com versão (`opus-5.5`, `sonnet-5`, `fable-5.1`; `opus 5.5`
 também serve): o driver recusa `opus` sozinho. Inclua só as lineups que o repo

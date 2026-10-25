@@ -8,7 +8,7 @@ description: The unattended ticket-flow driver — runs fresh Claude Code or Cod
 `scripts/sweatshop.ps1 <repo> [-Lineup <name>]` runs the lineup's models: each
 stage on the runtime its model belongs to (`gpt-*` on Codex, the rest on Claude
 Code), so a lineup may pair a Codex implementer with a Claude reviewer.
-`scripts/sweatshop-codex.ps1 <repo>` is `-Lineup Codex`. It sends bare ids into a fresh CLI session, one stage at a
+`scripts/sweatshop-codex.ps1 <repo>` is `-Lineup sol`. It sends bare ids into a fresh CLI session, one stage at a
 time, then reads `Stage:` back. **The driver adds
 no instructions of its own.** Everything a session does, it does because
 `ticket-flow/SKILL.md` says so; this file owns only the driver.
@@ -142,11 +142,13 @@ recursive search from the skills directory if needed. Never select the runtime
 from which CLIs happen to be installed: both can be installed on one machine.
 
 The target repo's `## Bindings do fluxo` block supplies the lineups, one
-`Models` line each. With no `-Lineup` the driver reads `Models (Claude):`, else
-`Models:`; `-Lineup night` reads `Models (night):` and never falls back. The
-driver refuses a missing line instead of guessing a model. Choosing the lineup:
+`Models (<name>)` line each. `Models (default): sol` names the lineup a run
+with no `-Lineup` takes; `-Lineup opus` reads `Models (opus):` and never falls
+back. A repo with no `default` line falls back to the legacy `Models (Claude):`,
+then `Models:`. The driver refuses a missing line instead of guessing a model.
+Choosing the lineup:
 
-- The user names a binding line ("the night lineup", "nightshift"): `-Lineup night`.
+- The user names a binding line ("the opus lineup", "run it on opus"): `-Lineup opus`.
 - The user spells out models ("luna max implements, opus 5.5 reviews"): pass them
   for this run only, in the binding's syntax:
   `-Models 'stage 2 gpt-6-luna max, stage 3 opus-5.5 high'`.
@@ -168,9 +170,9 @@ Claude models carry their version (`opus-5.5`, `sonnet-5`, `fable-5.1`,
 alias moves when a new model ships, and the lineup would change unannounced. For
 example:
 
-    - Models: stage 1 opus-5.5, stage 2 sonnet-5 high, hard opus-5.5 high, stage 3 opus-5.5 high
-    - Models (Codex): stage 1 gpt-6-sol, stage 2 gpt-6-luna high, stage 3 gpt-6-sol high
-    - Models (night): stage 2 gpt-6-luna max, stage 3 opus-5.5 high
+    - Models (default): sol
+    - Models (sol): stage 2 gpt-6.1-sol high, hard gpt-6.1-sol xhigh, stage 3 gpt-6.1-sol xhigh
+    - Models (opus): stage 2 opus-5.5 high, hard opus-5.5 xhigh, stage 3 opus-5.5 xhigh
 
 A mixed lineup needs both CLIs installed and logged in; the driver checks at start.
 
@@ -184,7 +186,7 @@ fluxo` block; otherwise ask which. When asked to run, launch the selected script
 and show where its output lands. These are the corresponding commands:
 
     & "<skills-dir>\sweatshop\scripts\sweatshop.ps1" "<repo>"
-    & "<skills-dir>\sweatshop\scripts\sweatshop.ps1" "<repo>" -Lineup night
+    & "<skills-dir>\sweatshop\scripts\sweatshop.ps1" "<repo>" -Lineup opus
     & "<skills-dir>\sweatshop\scripts\sweatshop.ps1" "<repo>" -Models 'stage 2 gpt-6-luna max, stage 3 opus-5.5 high'
     & "<skills-dir>\sweatshop\scripts\sweatshop-codex.ps1" "<repo>"
     & "<skills-dir>\sweatshop\scripts\sweatshop.ps1" "<repo>\.artifacts-build\lanes\flutter" -Lane flutter
