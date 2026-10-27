@@ -83,6 +83,22 @@ Check 'committed session state wins over dirty working ticket' {
     Assert ((Ticket "$Repo/.scratch/feature/issues/T-1.md").Stage -eq 'to-implement') 'Dirty done became committed delivery'
   } finally { Pop-Location }
 }
+Check 'pre-rebase copy of a merged ticket branch is spent, new work on it is not' {
+  Fixture rebased; Push-Location $Repo
+  try {
+    WriteTicket T-1 to-implement; StartSession
+    GitOk checkout -qb t-1; [IO.File]::WriteAllText("$Repo/feature.txt", 'work'); GitOk add .; GitOk commit -qm work
+    WriteTicket T-1 to-review; GitOk commit -qam ready
+    # The PR lands rebased: same patches, new hashes, then review closes it on the session.
+    GitOk checkout -q $Loop; WriteTicket T-2 to-implement; GitOk add .; GitOk commit -qm other
+    GitOk cherry-pick "$Loop..t-1" | Out-Null; WriteTicket T-1 done none 'Verdict: Approve'; GitOk commit -qam close
+    Assert ((Ticket "$Repo/.scratch/feature/issues/T-1.md").Stage -eq 'done') 'Stale pre-rebase branch reopened a done ticket'
+    Assert ((NextTicket).Id -eq 'T-2') 'Stale branch was dispatched for review again'
+    GitOk checkout -q t-1; [IO.File]::WriteAllText("$Repo/feature.txt", 'more'); WriteTicket T-1 to-review; GitOk commit -qam more
+    GitOk checkout -q $Loop
+    Assert ((Ticket "$Repo/.scratch/feature/issues/T-1.md").Stage -eq 'to-review') 'Unmerged commits on the branch were ignored'
+  } finally { Pop-Location }
+}
 Check 'remote-only stage and linear local/origin histories follow the same discovery contract' {
   Fixture remote; Push-Location $Repo
   try {

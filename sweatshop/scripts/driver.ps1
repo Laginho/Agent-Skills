@@ -242,7 +242,7 @@ function Ticket($file) {
   if (-not $branch) { $branch = $id.ToLower() }
   # Stage lives on the ticket's branch until merge: read it there if unmerged.
   # ...except `blocked` on the base branch, which is the driver parking it: that wins.
-  $unmerged = $activeBranch -and -not (Test-GitAncestor $Repo $branch $Loop)
+  $unmerged = $activeBranch -and -not (Test-GitAncestor $Repo $branch $Loop) -and -not (Test-SpentBranch $branch $rel)
   $sessionStage = Field $text 'Stage'
   if ($unmerged -and $sessionStage -ne 'blocked') {
     $text = (git show "${branch}:$rel" 2>$null) -join "`n"
@@ -264,6 +264,18 @@ function Ticket($file) {
                      Review = $(if (Field $text 'Review') { Field $text 'Review' } else { 'agent' }); Verdict = $verdict
                      Difficulty = Field $text 'Difficulty'; Reopens = Reopens $text; Text = $text
                      GateEvidence = Field $text 'Gate evidence'; HandoffError = $handoffError }
+}
+# A rebased PR leaves its pre-rebase branch unmerged by ancestry. It is spent when the
+# session or base already says done and every commit of it landed by patch-id (`git cherry`
+# prints no `+`). Measured 2026-10-25: four such P-Chess branches read done tickets as
+# to-review; CLEAN-002 was reviewed again and committed blocked.
+# shortcut: a squash merge matches no patch-id, so its branch still reads; delete such branches after merge.
+function Test-SpentBranch($branch, $rel) {
+  foreach ($ref in @($Loop, $Base | Select-Object -Unique)) {
+    $text = try { (GitOk show "${ref}:$rel") -join "`n" } catch { '' }
+    if ((Field $text 'Stage') -eq 'done' -and -not (@(GitOk cherry $ref $branch) -match '^\+')) { return $true }
+  }
+  $false
 }
 # Every reopen leaves a `Verdict: Reopen ...` line in the ticket (ticket-flow, Reopening).
 function Reopens($text) { ([regex]::Matches($text, '(?m)^Verdict:\s*Reopen')).Count }
