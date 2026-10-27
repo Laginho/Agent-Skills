@@ -24,7 +24,7 @@ in chat, not a file.
      base; otherwise `<base>` is. Read the tracker from the loop's base —
      `git ls-tree -r --name-only <loop base> -- .scratch/` to list,
      `git show <loop base>:<path>` to read — never from the working tree unless it
-     is the loop's base checked out. Name an open session in **Em andamento** with
+     is the loop's base checked out. Name an open session in **In progress** with
      `git rev-list --count <base>..<session>` commits ahead. Lane sessions
      (`sweatshop/<lane>/<stamp>`) can be open side by side: each is the loop's base
      for the tickets in `.scratch/<lane>/`; read every other ticket from `<base>`.
@@ -43,7 +43,7 @@ in chat, not a file.
      its dependents. A dirty ticket's working copy is not committed state.
    - **Everything else.** Any other branch in
      `git branch -a --no-merged <loop base>` is unmerged work the tracker does not
-     name. List them in one line under **Em andamento** with commits ahead; do not
+     name. List them in one line under **In progress** with commits ahead; do not
      read their diffs.
 3. **Tracker.** The standard layout is `.scratch/<feature>/` with `spec.md`, one ticket
    per file under `issues/`, and optionally `ledger.md`. Ticket filenames vary by repo
@@ -76,7 +76,7 @@ in chat, not a file.
      Missing Priority and directory names do not establish acceptance. An explicit
      runnable `Stage` with satisfied blockers remains work; a contradictory
      deferral marker requires correction, not silent removal from the queue.
-     Count genuinely deferred tickets separately in **Aberto**.
+     Count genuinely deferred tickets separately in **Open**.
 5. **Git.** The refresh in step 2: if `git pull --ff-only` fails (no upstream,
    diverged branch, dirty tree), say so in one line and read the state as-is; never
    force, merge or stash to make it succeed.
@@ -97,17 +97,17 @@ Never read closed tickets' bodies for the brief; they are history, not state.
 Portuguese if the repo's docs are in Portuguese, otherwise English. Five short blocks,
 plain prose or one-line bullets, no headers wider than this:
 
-**Feito** — the last 2–3 closed tickets or ledger entries, feature-level, with IDs and
+**Done** — the last 2–3 closed tickets or ledger entries, feature-level, with IDs and
 dates. Tickets only: no commit hashes, and never lead with tracker migrations, header
 sweeps or other housekeeping commits.
 
-**Em andamento** — claimed/in-progress tickets, plus a dirty working tree if any.
+**In progress** — claimed/in-progress tickets, plus a dirty working tree if any.
 
-**Aberto** — count of open tickets per feature, and the count must equal the number of
+**Open** — count of open tickets per feature, and the count must equal the number of
 open ticket files you saw; name the top 3 by priority/dependency order. If a
 phase/feature is fully closed, say so in one line and move on.
 
-**Desbloqueado** — the open tickets as a tree, indented under what blocks them, so the
+**Unblocked** — the open tickets as a tree, indented under what blocks them, so the
 reader gets the queue *and* why the rest waits. Roots are the tickets whose blockers are
 all closed — that is the work queue. Under a `blocked` or `to-merge` node, add the last
 `## Comments` line: it is the question waiting on a human. On a repeat (a ticket with
@@ -116,14 +116,14 @@ several blockers) print `ID ...` rather than re-expanding it.
 ```
 DEP-006       to-review
   DEP-001     blocked
-  > axios 1.20 declara ...
+  > axios 1.20 declares ...
     QA-001    to-implement
 CLEAN-003     to-implement
 ```
 
 This block is mandatory. Accepted debt stays out of it (step 4).
 
-**Próximo passo** — one recommendation: the first open, unblocked ticket in dependency
+**Next step** — one recommendation: the first open, unblocked ticket in dependency
 order, with its path. If nothing is open: say the tracker is empty and offer three
 concrete options (code audit, bug hunt against a named area, new feature from the
 spec) — do not invent tickets.

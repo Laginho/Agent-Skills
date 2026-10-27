@@ -30,7 +30,7 @@ defined here, in "What this loop adds" below — nowhere else.
 | # | Skill | Delivers | Stops and reports if |
 |---|---|---|---|
 | 1 | `grill-proxy` → `to-spec` → `to-tickets` | `spec.md` + one ticket file per ticket, `Stage: to-implement` | the human does not approve the seams or the slicing |
-| 2 | `tdd` | branch named for the id, `Stage: implementing`; alternating **test-only commits, red for the right reason**, and production-only commits; gate evidence; `Stage: to-review` | the ticket needs more than one seam (back to stage 1), or a committed test proves the *contract* wrong — a criterion that cannot hold, a seam that does not exist (`Stage: blocked` + reason). A test wrong only in its harness is not a stop (below) |
+| 2 | `tdd` | branch named for the id, `Stage: implementing`; alternating **test-only commits, red for the right reason**, and production-only commits; gate evidence; `Stage: to-review` | the ticket needs more than one seam (back to stage 1), or a committed test proves the *contract* wrong — a criterion that cannot hold, a seam that does not exist (`Stage: blocked` + reason). Each stop is a question for the proxy first; `blocked` only on its `Escalate` ("Asking the proxy"). A test wrong only in its harness, or one asserting behaviour a criterion replaces, is not a stop (below) |
 | 3 | `code-review` (Standards + Spec axes) | small fixes; then either merge, or a PR that waits | a finding is large — reopen the ticket, back to stage 2 |
 
 Stage 1 also registers new ids in the repo's plan document, if it has one, at the
@@ -54,7 +54,9 @@ Two overrides on the skills the stages call:
   seam the user has not confirmed; here the ticket *is* that confirmation — its
   Primary files and its "Tests stage 2 writes" section name the seams, approved
   when the human approved the ticket. Stop only if the ticket needs a seam it
-  does not name, which is the back-to-stage-1 case.
+  does not name, which is the back-to-stage-1 case — and stopping starts with
+  the proxy, attended or not: its `Decision` folds the answer in and stage 2
+  carries on; only its `Escalate` sets `blocked`.
 - **Nobody refactors mid-loop.** `tdd` parks refactoring in the review stage; the
   review parks anything outside the ticket's Primary files in a `CLEAN-*` ticket,
   except documentation the change made stale, which it fixes (below).
@@ -136,7 +138,9 @@ Six additions, and each earns its place:
   they go stale. True of prose; this list is not prose, it is the boundary — the
   implementer may touch those files and nothing else. Keep it to the files in
   play, never an implementation plan. The ADR or doc that describes a mechanism
-  the ticket changes is in play.
+  the ticket changes is in play. So are the tests that assert behaviour a
+  criterion replaces: grep for them while writing the ticket and list them,
+  marked test-only.
 - **Numbered criteria**, not checkboxes, so a review can fail "criterion 5" by name.
   Each one satisfiable: before publishing, check every criterion against the
   others and against the physics or spec it rests on. Measured 2026-10-01: PHY-45
@@ -253,6 +257,17 @@ as equivalent, with the reason. Only a test that shows the criteria themselves
 cannot hold stops stage 2. Measured 2026-09-30: four of fifteen stage-2 runs
 stopped on the old wording; the proxy answered all four without the human, three
 of them with exactly this fix.
+
+**A committed test asserting behaviour a criterion replaces is updated, not
+escalated.** It was right under the old contract; the ticket retires that
+contract. Its file counts as a test-only Primary file even when stage 1 did not
+list it. In its own test-only commit, change only what the replaced behaviour
+forces: how the test reaches the behaviour, or an assertion that states the old
+behaviour, which takes the criterion's new one. Every assertion on behaviour the
+ticket keeps stays byte-for-byte. Prove it red by mutating the production code,
+and name each updated test under `## Comments`. Measured 2026-10-27: UI-012
+stage 2 blocked on eight such tests; the proxy allowed exactly this edit, citing
+CLEAN-001 and CLOCK-001 as the same answer.
 
 **Stage 2 reads around its change before the red test.** List the callers of every
 function it changes and the degenerate inputs the change itself creates (an empty
@@ -473,19 +488,21 @@ work. Do not copy this skill into the repo — one copy of the standard is the p
     - Models (default): <lineup>
     - Models (<lineup>): stage 2 <model> [effort], hard <model> [effort], stage 3 <model> [effort]
 
-Cada linha `Models (<nome>):` é uma lineup, escolhida com `-Lineup <nome>`.
-`Models (default):` não lista modelos: nomeia a lineup que o driver roda sem
-`-Lineup`. O `sweatshop-codex.ps1` roda `-Lineup sol`. Repo sem `default` cai no
-legado `Models (Claude):`, depois `Models:`. O runtime segue o modelo, estágio por estágio (`gpt-*`
-roda no Codex, o resto no Claude Code), então uma lineup pode misturar os dois.
-Modelo Claude sempre com versão (`opus-5.5`, `sonnet-5`, `fable-5.1`; `opus 5.5`
-também serve): o driver recusa `opus` sozinho. Inclua só as lineups que o repo
-usa. O `[effort]` é opcional; sem ele, `high`.
+Each `Models (<name>):` line is a lineup, chosen with `-Lineup <name>`.
+`Models (default):` lists no models: it names the lineup the driver runs without
+`-Lineup`. `sweatshop-codex.ps1` runs `-Lineup sol`. A repo with no `default`
+falls back to the legacy `Models (Claude):`, then `Models:`. The runtime follows
+the model, stage by stage (`gpt-*` runs in Codex, the rest in Claude Code), so
+one lineup can mix both. Claude models always carry a version (`opus-5.5`,
+`sonnet-5`, `fable-5.1`; `opus 5.5` also works): the driver refuses a bare
+`opus`. Include only the lineups the repo uses. `[effort]` is optional; without
+it, `high`.
 
-`hard` é o implementador dos tickets `Difficulty: hard` e dos que já reabriram
-duas vezes; sem ele, o stage 2 implementa todos. Só o implementador muda: o
-revisor da lineup tem que bastar para qualquer ticket. O revisor mais caro fica
-para o PR `Review: human` e para as auditorias antes de release.
+`hard` is the implementer for `Difficulty: hard` tickets and for tickets that
+have reopened twice; without it, stage 2 implements them all. Only the
+implementer changes: the lineup's reviewer has to be enough for any ticket. The
+more expensive reviewer is kept for the `Review: human` PR and for pre-release
+audits.
 
 Tracker paths and ticket shape do **not** go in this block. They are already in
 `docs/agents/issue-tracker.md`.
