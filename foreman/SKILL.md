@@ -405,9 +405,9 @@ across runs. Fewer than three: the summary is enough.
   `set_size` in `render_ui.py` caused it." Sources: the ticket on the session
   branch, its merge diff and the review findings (section 6), never memory.
   Tickets of one kind (content drafts) can share a paragraph with a line each.
-- **Roadmap image:** when `AGENTS.md` has a `Roadmap:` binding, the detailed
+- **Roadmap image:** when `AGENTS.md` has a `Roadmap:` binding, the per-session
   roadmap as this run left it goes right after **What was done**. On the
-  session branch, run the binding's detailed command, render its SVG to
+  session branch, run the binding's per-session command, render its SVG to
   `docs/relatorios/<report>-roadmap.png` as the binding says, and
   `\includegraphics` it. Then restore the files the command wrote
   (`git checkout -- <files>`) before committing anything: they are tracked, and
@@ -456,20 +456,24 @@ across runs. Fewer than three: the summary is enough.
   count you did not recompute from them does not go in. When a row's outcome
   lies (the driver read a stale copy), say so and report what really happened.
 
-## 8. Published roadmap (after the merge)
+## 8. Published roadmap
 
-A repo whose `AGENTS.md` has a `Roadmap:` binding publishes it once per merge
-round, from the main checkout, never from a lane: the generators read the
-working tree, so only the base after the merge holds every lane's tickets, and
-the publish rewrites whole pages that two foremen would overwrite. With such a
-binding, the summary's **Your turn** ends with "merge the PR, then ask for the
-roadmap".
+A `Roadmap:` binding in `AGENTS.md` lists each roadmap with its command, its page
+and when it is published. Publishing one means: render the PNG, read the page
+first (the human edits it), replace its image, and fetch it again to confirm.
+Without a tool for the pages, leave the PNG and say where it is.
 
-When the human asks: on the main checkout, `git pull --ff-only` on the base, run
-the binding's commands, render the PNGs, read each published page first (the
-human edits them), replace its image, and fetch it again to confirm. Commit the
-regenerated tracked files on the base and push, as a record. Without a tool for
-the pages, leave the PNGs and say where they are.
+- **Per-session roadmap**: publish it at the end of every run, after the section 9
+  sync, from the session branch. That branch is the base plus this lane, so the
+  page shows the run's work before the merge. It is the same image the report
+  embeds (section 7). Its files stay out of git, as the binding says.
+- **Every other roadmap**: publish from the main checkout, never from a lane,
+  at the moment the binding names, or when the human asks. Only the base after
+  the merge holds every lane's tickets, and two foremen would overwrite each
+  other's pages. `git pull --ff-only` on the base, run the command, publish,
+  then commit the regenerated tracked files on the base and push, as a record.
+  When the binding's moment falls after this run's merge, the summary's
+  **Your turn** ends with "merge the PR, then ask for the roadmap".
 
 ## 9. Sync with the base (lanes)
 
