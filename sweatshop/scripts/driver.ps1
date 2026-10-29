@@ -207,6 +207,11 @@ function Use-Session {
 # (what the vendored tracker writes around it). Measured 2026-09-15: the plain-only
 # regex read every bold ticket as stageless -- open tickets closed, nothing runnable.
 function Field($text, $name) { [regex]::Match($text, "(?m)^\*{0,2}$name\*{0,2}`:\*{0,2}\s*(.+?)\s*$").Groups[1].Value }
+# Stage 2 often writes the receipt as a bullet with a note: `- Gate evidence: <path> (note)`.
+# Measured 2026-10-24: that shape parked three valid P-Chess handoffs. Only this field
+# takes bullets; a comment bullet such as `- Stage: ...` must not move a ticket. A note is
+# dropped only after `.json`, so `C:\a (x86)\r.json` and `receipt (1)` stay whole paths.
+function GateEvidenceField($text) { [regex]::Match($text, '(?m)^(?:[-*]\s+)?\*{0,2}Gate evidence\*{0,2}:\*{0,2}\s*(.+?)(?:(?<=\.(?i:json))\s+\(.*\))?\s*$').Groups[1].Value }
 function Ticket($file) {
   $rel = [IO.Path]::GetFullPath($file).Substring($Repo.TrimEnd('\', '/').Length + 1) -replace '\\', '/'
   $text = (GitOk show "${Loop}:$rel") -join "`n"
@@ -244,7 +249,7 @@ function Ticket($file) {
   [pscustomobject]@{ Id = $id; File = $rel; Branch = $branch; Stage = $stage; BlockedBy = $blocked; LastComment = $last
                      Review = $(if (Field $text 'Review') { Field $text 'Review' } else { 'agent' }); Verdict = $verdict
                      Difficulty = Field $text 'Difficulty'; Reopens = Reopens $text; Text = $text
-                     GateEvidence = Field $text 'Gate evidence'; HandoffError = $handoffError }
+                     GateEvidence = GateEvidenceField $text; HandoffError = $handoffError }
 }
 # A rebased PR leaves its pre-rebase branch unmerged by ancestry. It is spent when the
 # session or base already says done and every commit of it landed by patch-id (`git cherry`
@@ -807,6 +812,12 @@ if ($SelfCheck) {
   # Field reading only `Stage:` is why a whole tracker once read as stageless.
   foreach ($shape in 'Stage: to-review', '**Stage:** to-review', '**Stage**: to-review') {
     if ((Field "# T-1: x`n$shape`n" 'Stage') -ne 'to-review') { throw "Field: $shape" }
+  }
+  # A bullet receipt with a note parked valid handoffs; a path with parentheses must survive.
+  foreach ($case in @(@('Gate evidence: C:\t\r.json', 'C:\t\r.json'), @('- Gate evidence: C:\t\r.json (gate 119/0)', 'C:\t\r.json'),
+                      @('* **Gate evidence:** C:\t\r.json', 'C:\t\r.json'), @('Gate evidence: C:\a (x86)\r.json', 'C:\a (x86)\r.json'),
+                      @('- Gate evidence: C:\a (x86)\r.json (gate 119/0 (full))', 'C:\a (x86)\r.json'), @('Gate evidence: C:\t\receipt (1)', 'C:\t\receipt (1)'))) {
+    if ((GateEvidenceField "# T-1: x`nStage: to-review`n$($case[0])`n") -ne $case[1]) { throw "GateEvidenceField: $($case[0])" }
   }
   # Verdict decides whether an attempt is spent; the shapes are the two real logs of 2026-09-14.
   $tmp = Join-Path $env:TEMP "sweatshop-verdict-$PID.txt"
