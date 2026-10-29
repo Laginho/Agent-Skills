@@ -189,6 +189,12 @@ Check 'gate evidence accepts metadata close but rejects stale skill or script co
     [IO.File]::WriteAllText("$Repo/.scratch/other/ledger.md", "- CLEAN-1 opened`n")
     GitOk add .; GitOk commit -qm notes
     Assert-GateEvidence $t $Loop
+    # A nested ticket changing itself and an upper-case `.MD` note are metadata too (the driver discovers both).
+    $nested = [pscustomobject]@{ Id = 'N-1'; File = '.scratch/feature/issues/nested/N-1.md'; GateEvidence = $receipt }
+    New-Item -ItemType Directory "$Repo/.scratch/feature/issues/nested" -Force | Out-Null
+    [IO.File]::WriteAllText("$Repo/$($nested.File)", "# N-1: x`n"); [IO.File]::WriteAllText("$Repo/.scratch/other/issues/UP-1.MD", "# UP-1: x`n")
+    GitOk add .; GitOk commit -qm nested
+    Assert-GateEvidence $nested $Loop
     foreach ($file in 'SKILL.md', 'code.ps1') {
       [IO.File]::WriteAllText("$Repo/$file", 'changed'); GitOk commit -qam changed
       $caught = $false; try { Assert-GateEvidence $t $Loop } catch { $caught = $true }

@@ -23,8 +23,10 @@ function Assert-GateEvidence($ticket, $ref) {
   # Only tracker tickets and feature ledgers may change after the checked commit: review
   # notes on other tickets and new tickets parked three valid merges on 2026-10-24
   # (BOT-002, BOT-006, UI-004). Skills, scripts and other documentation remain production.
-  $tracker = $ticket.File -replace '/[^/]+/issues/[^/]+$'
-  $changed = @(& git diff --name-only $proof.Code $ref -- . ":(exclude,glob)$tracker/*/issues/*.md" ":(exclude,glob)$tracker/*/ledger.md")
+  # This ticket and its ledger stay excluded by exact path, whatever the layout.
+  $ledger = ($ticket.File -replace '/issues/[^/]+$', '/ledger.md')
+  $tracker = $ticket.File -replace '/[^/]+/issues/.+$'
+  $changed = @(& git diff --name-only $proof.Code $ref -- . ":(exclude)$($ticket.File)" ":(exclude)$ledger" ":(exclude,glob,icase)$tracker/*/issues/**/*.md" ":(exclude,glob)$tracker/*/ledger.md")
   if ($LASTEXITCODE -or $changed) { throw "$($ticket.Id): code changed after gate ($($changed -join ', ')); reuse evidence only for identical code." }
 }
 if ($Command) {
