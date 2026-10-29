@@ -21,6 +21,25 @@ foreach ($helper in 'ticket-state.ps1', 'gate-evidence.ps1') {
   $path = Join-Path $PSScriptRoot $helper
   if (Test-Path $path) { . ([scriptblock]::Create((LoadFunctions $path))) }
 }
+. (Join-Path $PSScriptRoot 'proxy.ps1')
+$ProxyDir = Join-Path $root 'proxy-receipts'
+# The driver's own test-path pattern, not a copy that could drift from it.
+$tokens = $null; $errors = $null
+$assign = [Management.Automation.Language.Parser]::ParseFile($driver, [ref]$tokens, [ref]$errors).FindAll({param($n)
+  $n -is [Management.Automation.Language.AssignmentStatementAst] -and $n.Left.Extent.Text -eq '$TestFiles' -and $n.Operator -eq 'Equals' }, $false)
+. ([scriptblock]::Create($assign[0].Extent.Text))
+# A fake Codex: the proxy's read-only call answers $env:FAKE_PROXY_ANSWER into --output-last-message.
+$fakeBin = Join-Path $root 'bin'; New-Item -ItemType Directory $fakeBin -Force | Out-Null
+[IO.File]::WriteAllText("$fakeBin/fake-codex.ps1", @'
+$i = [array]::IndexOf($args, '--output-last-message')
+if ($env:FAKE_PROXY_ANSWER -and $i -ge 0) { [IO.File]::WriteAllText($args[$i + 1], $env:FAKE_PROXY_ANSWER) }
+Write-Output '{"type":"turn.completed","usage":{"input_tokens":1}}'
+'@)
+[IO.File]::WriteAllText("$fakeBin/codex.cmd", "@echo off`r`npowershell -NoProfile -ExecutionPolicy Bypass -File `"$fakeBin/fake-codex.ps1`" %*`r`n")
+$fakeCard = Join-Path $root 'proxy.md'
+[IO.File]::WriteAllText($fakeCard, "---`nname: proxy`nmodel: gpt-fake`neffort: high`n---`n`nYou stand in for the owner.`n")
+$ProxyCard = $fakeCard
+$env:PATH = "$fakeBin;$env:PATH"
 function Fixture($name) {
   $script:Repo = Join-Path $root $name
   New-Item -ItemType Directory "$Repo/.scratch/feature/issues" -Force | Out-Null
@@ -81,6 +100,22 @@ Check 'committed session state wins over dirty working ticket' {
   try {
     WriteTicket T-1 to-implement; StartSession; WriteTicket T-1 done
     Assert ((Ticket "$Repo/.scratch/feature/issues/T-1.md").Stage -eq 'to-implement') 'Dirty done became committed delivery'
+  } finally { Pop-Location }
+}
+Check 'pre-rebase copy of a merged ticket branch is spent, new work on it is not' {
+  Fixture rebased; Push-Location $Repo
+  try {
+    WriteTicket T-1 to-implement; StartSession
+    GitOk checkout -qb t-1; [IO.File]::WriteAllText("$Repo/feature.txt", 'work'); GitOk add .; GitOk commit -qm work
+    WriteTicket T-1 to-review; GitOk commit -qam ready
+    # The PR lands rebased: same patches, new hashes, then review closes it on the session.
+    GitOk checkout -q $Loop; WriteTicket T-2 to-implement; GitOk add .; GitOk commit -qm other
+    GitOk cherry-pick "$Loop..t-1" | Out-Null; WriteTicket T-1 done none 'Verdict: Approve'; GitOk commit -qam close
+    Assert ((Ticket "$Repo/.scratch/feature/issues/T-1.md").Stage -eq 'done') 'Stale pre-rebase branch reopened a done ticket'
+    Assert ((NextTicket).Id -eq 'T-2') 'Stale branch was dispatched for review again'
+    GitOk checkout -q t-1; [IO.File]::WriteAllText("$Repo/feature.txt", 'more'); WriteTicket T-1 to-review; GitOk commit -qam more
+    GitOk checkout -q $Loop
+    Assert ((Ticket "$Repo/.scratch/feature/issues/T-1.md").Stage -eq 'to-review') 'Unmerged commits on the branch were ignored'
   } finally { Pop-Location }
 }
 Check 'remote-only stage and linear local/origin histories follow the same discovery contract' {
@@ -258,6 +293,128 @@ Check 'retry drops a ticket branch held by a leftover stage worktree and keeps i
     $ref = ($saved[0] -split ' ')[0]
     Assert ((GitOk show "${ref}^3:attempt.txt") -eq 'uncommitted attempt') 'Uncommitted worktree work lost'
   } finally { Pop-Location }
+}
+Check 'a commit mixing test and production fails the handoff; split commits, metadata and listed fixtures pass' {
+  Fixture testfirst; Push-Location $Repo
+  try {
+    WriteTicket T-1 to-implement; StartSession
+    $saved = $TestFiles; $script:TestFiles = "$TestFiles|^shared/cases\.json$"
+    $commit = { param($msg, [string[]]$files) foreach ($f in $files) { New-Item -ItemType Directory -Force (Split-Path "$Repo/$f") | Out-Null; [IO.File]::WriteAllText("$Repo/$f", "$msg $f") }; GitOk add .; GitOk commit -qm $msg }
+    # Mixed work already on the session is not this stage's.
+    & $commit 'session mix' 'old.test.ts', 'old.ts'
+    GitOk checkout -qb t-1
+    & $commit 'red' 'app/src/soma.test.ts', 'flutter/test/soma_test.dart'
+    & $commit 'green' 'app/src/soma.ts', '.scratch/feature/issues/T-1.md'
+    & $commit 'fixture' 'shared/cases.json', 'tools/test_soma.py'
+    $t = [pscustomobject]@{ Id = 'T-1'; Branch = 't-1' }
+    Assert-TestFirst $t $null
+    $from = GitOk rev-parse t-1
+    & $commit 'mixed' 'app/src/sub.test.ts', 'app/src/sub.ts'
+    $caught = try { Assert-TestFirst $t $null; '' } catch { "$_" }
+    Assert ($caught -match 'mixes app/src/sub\.test\.ts with app/src/sub\.ts') "Mixed commit passed: $caught"
+    GitOk reset -q --hard HEAD~1
+    # A reopen keeps the last pass: commits before the stage started are not re-judged.
+    & $commit 'earlier pass' 'b.test.ts', 'b.ts'; $from = GitOk rev-parse t-1
+    & $commit 'this pass' 'c.test.ts'
+    Assert-TestFirst $t $from
+    # Bringing the session in by merge is not a commit of the stage.
+    GitOk checkout -q $Loop; & $commit 'session mix 2' 'd.test.ts', 'd.ts'; GitOk checkout -q t-1; GitOk merge -q --no-edit $Loop
+    Assert-TestFirst $t $from
+  } finally { $script:TestFiles = $saved; Pop-Location }
+}
+Check 'proxy lines need a receipt from proxy.ps1 for that ticket and model; history and quotes pass' {
+  Fixture receipts; Push-Location $Repo
+  try {
+    $env:FAKE_PROXY_ANSWER = "**Decision:** use the seam in soma.ts — the spec names it`n`nDraft criterion: 4. ..."
+    $p = Invoke-Proxy $Repo 'T-1' 'Which seam?'
+    Assert ($p.Kind -eq 'decided' -and $p.Who -eq 'gpt-fake high' -and $p.Decision -eq 'use the seam in soma.ts — the spec names it') "Answer misread: $($p | ConvertTo-Json)"
+    Assert ((Get-Content $p.Receipt -Raw | ConvertFrom-Json).Answer -match 'Draft criterion') 'Receipt lost the full answer'
+    $legacy = "## Comments`n- 2026-10-01 Proxy decided: legacy, no receipt`n- Proxy decided (opus): legacy`n"
+    $after = "$legacy- 2026-10-29 $($p.Line)`nAs duas linhas ``Proxy decided`` foram revisadas.`nDisclosure: decision | none | Proxy decided (opus), Comments`n"
+    Assert-ProxyReceipts 'T-1' $legacy $after
+    foreach ($bad in @("- Proxy decided (gpt-fake high): typed by the stage", "- 2026-10-29 Proxy escalated: no who",
+                       ($p.Line -replace 'gpt-fake high', 'opus-5.5 xhigh'), ($p.Line -replace 'Proxy decided', 'Proxy escalated'))) {
+      $caught = try { Assert-ProxyReceipts 'T-1' $legacy "$legacy$bad`n"; '' } catch { "$_" }
+      Assert $caught "Accepted: $bad"
+    }
+    $caught = try { Assert-ProxyReceipts 'T-2' '' "- $($p.Line)"; '' } catch { "$_" }
+    Assert ($caught -match 'does not match') "Receipt for T-1 accepted on T-2: $caught"
+    $env:FAKE_PROXY_ANSWER = "Escalate: deleting the progress table loses data`n`nQuestion for the owner: ..."
+    Assert ((Invoke-Proxy $Repo 'T-1' 'Drop the table?').Line -match '^Proxy escalated \(gpt-fake high\): deleting') 'Escalation misread'
+    $env:FAKE_PROXY_ANSWER = 'I think seam A.'
+    $caught = try { Invoke-Proxy $Repo 'T-1' 'Which?'; '' } catch { "$_" }
+    Assert ($caught -match 'no Decision or Escalate') "Unlabelled answer accepted: $caught"
+  } finally { $env:FAKE_PROXY_ANSWER = $null; Pop-Location }
+}
+Check 'proxy.ps1 from a session: answers, pings, and fails fast where the ping failed' {
+  Fixture proxycli; Push-Location $Repo
+  try {
+    $card = Join-Path $root 'proxycli-install'; New-Item -ItemType Directory "$card/scripts" -Force | Out-Null
+    Copy-Item (Join-Path $PSScriptRoot '*.ps1'), (Join-Path $PSScriptRoot 'StageProcess.cs') "$card/scripts"
+    Copy-Item $fakeCard "$card/proxy.md"
+    $script = "$card/scripts/proxy.ps1"; $ErrorActionPreference = 'Continue'
+    $env:FAKE_PROXY_ANSWER = 'Decision: pong'
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File $script -Repo $Repo -Ping 2>&1 | Out-String; $code = $LASTEXITCODE
+    Assert ($code -eq 0 -and $out -match 'Decision: pong') "Ping: $code $out"
+    $env:FAKE_PROXY_ANSWER = 'Decision: yes — fixture'
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File $script -Repo $Repo -Ticket T-1 -Question 'Is it?' 2>&1 | Out-String
+    Assert ($LASTEXITCODE -eq 0 -and $out -match '(?m)^- Proxy decided \(gpt-fake high\): yes — fixture \(receipt .+\.json\)') "Answer: $out"
+    $env:SWEATSHOP_PROXY = 'driver'
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File $script -Repo $Repo -Ticket T-1 -Question 'Is it?' 2>&1 | Out-String
+    Assert ($LASTEXITCODE -eq 3 -and $out -match 'Stage: blocked') "Fail-fast: $LASTEXITCODE $out"
+    $env:SWEATSHOP_PROXY = $null; $env:FAKE_PROXY_ANSWER = $null
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File $script -Repo $Repo -Ticket T-1 -Question 'Is it?' 2>&1 | Out-String
+    Assert ($LASTEXITCODE -eq 2 -and $out -match 'Proxy failed' -and $out -match 'Stage: blocked') "Failure: $LASTEXITCODE $out"
+  } finally { $env:SWEATSHOP_PROXY = $null; $env:FAKE_PROXY_ANSWER = $null; $ErrorActionPreference = 'Stop'; Pop-Location }
+}
+Check 'the driver puts an asked stage to the proxy: decision resumes, escalation stays, a third ask waits' {
+  Fixture asked2; Push-Location $Repo
+  try {
+    $origin = Join-Path $root 'asked2-origin.git'; GitOk init -q --bare -b main $origin
+    WriteTicket T-1 to-implement; StartSession; GitOk remote add origin $origin; GitOk push -q -u origin $Loop
+    $before = (Ticket "$Repo/.scratch/feature/issues/T-1.md").Text
+    $ask = { WriteTicket T-1 blocked none '- Which seam?'; GitOk commit -qam ask; Ticket "$Repo/.scratch/feature/issues/T-1.md" }
+    $env:FAKE_PROXY_ANSWER = "Decision: seam A — the spec names it`nDraft: criterion 5."
+    Answer-Asked (& $ask) $before 'Which seam?'
+    $t = Ticket "$Repo/.scratch/feature/issues/T-1.md"
+    Assert ($t.Stage -eq 'to-implement' -and $t.Text -match '(?m)^- \d{4}-\d\d-\d\d Proxy decided \(gpt-fake high\): seam A' -and $t.Text -match '(?m)^  > Draft: criterion 5\.') "Decision not recorded: $($t.Text)"
+    Assert-ProxyReceipts 'T-1' $before $t.Text
+    $env:FAKE_PROXY_ANSWER = 'Escalate: it spends money'
+    Answer-Asked (& $ask) $before 'Pay?'
+    $t = Ticket "$Repo/.scratch/feature/issues/T-1.md"
+    Assert ($t.Stage -eq 'blocked' -and $t.Text -match 'Proxy escalated \(gpt-fake high\): it spends money') "Escalation not recorded: $($t.Text)"
+    $third = & $ask
+    Answer-Asked $third $before 'Third?'
+    Assert ((Ticket "$Repo/.scratch/feature/issues/T-1.md").Text -eq $third.Text) 'Third ask went to the proxy'
+    # A stage that reached the proxy itself and got Escalate is the human's already.
+    $script:Asked = @{}
+    $p = Invoke-Proxy $Repo 'T-1' 'x'
+    $stageText = "$before`n- $($p.Line)"
+    $env:FAKE_PROXY_ANSWER = 'Decision: should not be asked'
+    $last = (Ticket "$Repo/.scratch/feature/issues/T-1.md").Text
+    Answer-Asked ([pscustomobject]@{ Id = 'T-1'; File = '.scratch/feature/issues/T-1.md'; Text = $stageText }) $before 'x'
+    Assert ((Ticket "$Repo/.scratch/feature/issues/T-1.md").Text -eq $last) 'Asked the proxy again after its escalation'
+  } finally { $env:FAKE_PROXY_ANSWER = $null; $script:Asked = $null; Pop-Location }
+}
+Check 'an asked reopen resumes after the answer: its stale blocked branch is kept aside' {
+  Fixture askedreopen; Push-Location $Repo
+  try {
+    $origin = Join-Path $root 'askedreopen-origin.git'; GitOk init -q --bare -b main $origin
+    WriteTicket T-1 to-implement; StartSession; GitOk remote add origin $origin; GitOk push -q -u origin $Loop
+    $before = (Ticket "$Repo/.scratch/feature/issues/T-1.md").Text
+    # The previous pass lives on the ticket's branch; this attempt asked on top of it.
+    GitOk checkout -qb t-1; [IO.File]::WriteAllText("$Repo/pass1.ts", 'previous pass'); GitOk add .; GitOk commit -qm pass1
+    WriteTicket T-1 blocked none '- Which seam?'; GitOk commit -qam ask; GitOk checkout -q $Loop
+    $t = Ticket "$Repo/.scratch/feature/issues/T-1.md"
+    $kept = Keep-Asked $t
+    Note $t "Attempt 1 stopped to ask$($kept): Which seam?" 'blocked'
+    $env:FAKE_PROXY_ANSWER = 'Decision: seam A - resume from the kept branch'
+    Answer-Asked $t $before 'Which seam?'
+    Assert ((NextTicket).Id -eq 'T-1' -and (NextTicket).Stage -eq 'to-implement') 'The answer did not make the reopened ticket runnable'
+    Assert ($kept -match 'recovery/asked/\d{8}-\d{6}/T-1') "Asked branch not kept aside: '$kept'"
+    $branch = [regex]::Match($kept, '`([^`]+)`').Groups[1].Value
+    Assert ((GitOk show "${branch}:pass1.ts") -eq 'previous pass') 'The previous pass was lost'
+  } finally { $env:FAKE_PROXY_ANSWER = $null; $script:Asked = $null; Pop-Location }
 }
 Write-Host "$checks checks; $($failures.Count) failures. Fixtures: $root"
 if ($failures) { throw ($failures -join "`n") }

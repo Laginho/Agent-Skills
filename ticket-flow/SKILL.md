@@ -30,7 +30,7 @@ defined here, in "What this loop adds" below — nowhere else.
 | # | Skill | Delivers | Stops and reports if |
 |---|---|---|---|
 | 1 | `grill-proxy` → `to-spec` → `to-tickets` | `spec.md` + one ticket file per ticket, `Stage: to-implement` | the human does not approve the seams or the slicing |
-| 2 | `tdd` | branch named for the id, `Stage: implementing`; alternating **test-only commits, red for the right reason**, and production-only commits; gate evidence; `Stage: to-review` | the ticket needs more than one seam (back to stage 1), or a committed test proves the *contract* wrong — a criterion that cannot hold, a seam that does not exist (`Stage: blocked` + reason). A test wrong only in its harness is not a stop (below) |
+| 2 | `tdd` | branch named for the id, `Stage: implementing`; alternating **test-only commits, red for the right reason**, and production-only commits; gate evidence; `Stage: to-review` | the ticket needs more than one seam (back to stage 1), or a committed test proves the *contract* wrong — a criterion that cannot hold, a seam that does not exist (`Stage: blocked` + reason). Each stop is a question for the proxy first; `blocked` only on its `Escalate`, or when it cannot be reached ("Asking the proxy"). A test wrong only in its harness, or one asserting behaviour a criterion replaces, is not a stop (below) |
 | 3 | `code-review` (Standards + Spec axes) | small fixes; then either merge, or a PR that waits | a finding is large — reopen the ticket, back to stage 2 |
 
 Stage 1 also registers new ids in the repo's plan document, if it has one, at the
@@ -54,7 +54,9 @@ Two overrides on the skills the stages call:
   seam the user has not confirmed; here the ticket *is* that confirmation — its
   Primary files and its "Tests stage 2 writes" section name the seams, approved
   when the human approved the ticket. Stop only if the ticket needs a seam it
-  does not name, which is the back-to-stage-1 case.
+  does not name, which is the back-to-stage-1 case — and stopping starts with
+  the proxy, attended or not: its `Decision` folds the answer in and stage 2
+  carries on; only its `Escalate`, or a call that cannot reach it, sets `blocked`.
 - **Nobody refactors mid-loop.** `tdd` parks refactoring in the review stage; the
   review parks anything outside the ticket's Primary files in a `CLEAN-*` ticket,
   except documentation the change made stale, which it fixes (below).
@@ -136,12 +138,12 @@ Six additions, and each earns its place:
   they go stale. True of prose; this list is not prose, it is the boundary — the
   implementer may touch those files and nothing else. Keep it to the files in
   play, never an implementation plan. The ADR or doc that describes a mechanism
-  the ticket changes is in play.
+  the ticket changes is in play. So are the tests that assert behaviour a
+  criterion replaces: grep for them while writing the ticket and list them,
+  marked test-only.
 - **Numbered criteria**, not checkboxes, so a review can fail "criterion 5" by name.
   Each one satisfiable: before publishing, check every criterion against the
-  others and against the physics or spec it rests on. Measured 2026-10-01: PHY-45
-  criterion 2 (no length jump at the wrap switch) could not hold, and it took a
-  reopen and a `Proxy decided` to rewrite it.
+  others and against the physics or spec it rests on.
 - **`Review:`.** Who clicks merge. `agent` (the default when the line is missing)
   lets stage 3 merge an approved PR itself; `human` holds the PR for the person.
   Stage 1 sets it when writing the ticket — the author decides what they want to
@@ -209,9 +211,9 @@ not satisfy dependencies. Only then dispatch:
 
 | Stage | What you do |
 |---|---|
-| `to-implement` | Stage 2. Call the `tdd` skill. |
+| `to-implement` | Stage 2. Read `stage2.md` beside this file, then call the `tdd` skill. |
 | `implementing` | A session stopped mid-run. Report what the branch holds and stop — do not continue blind. |
-| `to-review` | Stage 3. Call the `code-review` skill. |
+| `to-review` | Stage 3. Read `stage3.md` beside this file, then call the `code-review` skill. |
 | `reviewing` | Same as `implementing`: report and stop. |
 | `to-merge` | The PR waits on the human (no-session flow only). Report it and stop. |
 | `done` | Nothing to do. Say so and stop. |
@@ -234,101 +236,23 @@ Three guards:
 - **Reopened tickets look new.** `Stage: to-implement` on a ticket that carries a
   stage-3 review section means only the ❌ items are left, and the work continues
   on the existing branch. Read the ticket to the bottom before starting.
-
+  An attempt that stopped to ask leaves its branch as
+  `recovery/asked/<when>/<ID>`, named in its `Attempt N stopped to ask` line:
+  cut the ticket's branch from the session and bring those commits onto it
+  before starting. A reopened ticket's last pass and review block are there.
 ## The rules that hold the loop up
 
-**Each red/green cycle separates tests from production.** The load-bearing check is
-the `diff --stat` separation, not any agent's promise. Whoever writes the tests
-does not make them pass in the same commit, and stage 2 does not touch test files
-in a code commit. Later test-only commits and harness corrections are valid:
-each relevant cycle records its own red/green proof. This rule exists because green tests have sat on top of a broken
-parser — the tests were exercising a copy of the logic.
-
-**A committed test wrong in its harness is fixed, not escalated.** Timing, a
-broken helper, a mutant the criteria cannot tell apart from the real code: fix
-the test in its own test-only commit, prove it red again for the right reason
-(against the base, or by mutating the production code), and say what was wrong
-under `## Comments`. A surviving mutant that no criterion can separate is recorded
-as equivalent, with the reason. Only a test that shows the criteria themselves
-cannot hold stops stage 2. Measured 2026-09-30: four of fifteen stage-2 runs
-stopped on the old wording; the proxy answered all four without the human, three
-of them with exactly this fix.
-
-**Stage 2 reads around its change before the red test.** List the callers of every
-function it changes and the degenerate inputs the change itself creates (an empty
-set, a singular system, a value at the boundary), and give a test to any of them
-the change could break. A regression is a reopen whatever the criteria say.
-Measured: APP-025 (2026-09-29) broke a caller one grep away; PHY-41 (2026-09-30)
-turned two collinear ropes into a singular system. Both reopened, both
-`S2-implícito`.
+Stage 2's rules are in `stage2.md` and stage 3's in `stage3.md`, beside this file;
+each stage reads its own before it starts. These hold for both.
 
 **Primary files and the numbered criteria are the contract.** Stage 2 reads those
 two lists and treats them as binding. A requirement stated only in prose is
 invisible: it gets met by accident or not at all.
 
-**Small fix, or back to stage 2.** Comments, stale documentation and tiny obvious
-corrections inside Primary files may be fixed in review. Meaningful production
-behavior authored during review, including test-exempt tickets, gets a fresh
-independent review of the added diff before approval. Prefer reopening to stage 2
-for behavioral repairs needing new tests or source outside Primary files; if a
-reviewer already wrote such a repair, preserve it and hand it to another reviewer.
-Record author, independent reviewer, examined diff and verdict in Resolution.
-
-**Documentation the change made stale is a small fix wherever it lives.** A
-comment, an ADR or a design note that now describes the old mechanism changes no
-behaviour and needs no test: stage 3 corrects it in its own fix commit instead of
-opening a `CLEAN-*` ticket. Measured 2026-10-01: three docs-only `CLEAN-*` tickets
-for ADR-0004 cost 20% of a run, a full stage-2 and stage-3 cycle each.
-
-**Stage 3 reviews against the written contract, every finding in one pass.**
-A reopen is earned by one of three things: a numbered criterion the code does
-not meet, a Primary-files or test-first rule broken (inspect every commit's
-`git diff --stat`: test-only red cycles alternate with production-only changes,
-with ticket metadata allowed in either), or a regression — the
-change broke something that worked before it. A requirement the criteria do not
-state is none of these, however sensible: it becomes a `CLEAN-*` ticket and the
-review approves on the criteria as written. Stage 3 never rewrites a criterion's
-text; only stage 1 does. Read the whole diff before writing the verdict. In the first review block,
-record the affected callers, failure paths and cross-feature interactions examined,
-and any not examined; the numbered criterion verdicts remain the acceptance record.
-List every finding in that verdict — a finding held back for the next pass costs a
-full stage-2 cycle. A re-review checks the ❌ items and the diff since the last
-review; a new finding in code the previous pass already read is named as that
-pass's miss. Measured 2026-09-24: SYN-010 took two extra cycles (52% of its
-time) for findings that were all visible in the first pass, two of them new
-requirements.
-
-**Every confirmed unresolved finding has an open destination or an explicitly
-accepted deferral.** On an open ticket it goes under `## Comments`; on a closed
-ticket, create/link an open follow-up or record who accepted deferral, why and
-integration/release impact. A comment on a closed ticket alone is not scheduled
-work. Link the original ticket for history. Only stage 1 moves a comment into the body, and
-when it does it adds the file to Primary files and a numbered criterion. An
-unfolded comment is a note, not a requirement: prose in a body that no file and no
-criterion backs is invisible to stage 2, which will ship green without it.
-
-**Red-green proof before reporting.** Show that the new tests fail without the
-change and pass with it. Report the real suite counts, not rounded ones. Every bug
-fix has a test that would fail without it, and that test calls production code,
-never a copy of it.
-
-**Reopening.** A review that knocks down a closed ticket sets
-`Stage: to-implement`, marks which criterion fell (❌ with the reason), removes the
-ledger line, and appends a review block saying what is left. The block's
-verdict line is `Verdict: Reopen — <what fell>`: the driver counts those lines,
-and the second one makes the driver park the ticket for the foreman to diagnose
-the cause before retrying (foreman, section 2). The next stage 2 still uses the
-`hard` implementer when configured; that escalation does not settle a contract
-gap or an earlier review miss.
-
 ## Commits and closing
 
 Conventional Commits in English, the body saying why and citing the id
 (`fix: ... (BUG-003)`). Never squash.
-
-Stage 3 closes by appending a `#### Resolution (YYYY-MM-DD)` block to the ticket —
-decision, files, red-green proof, gate output — and adding the ledger line, in the
-same commit as `Stage: done`. **The ticket is the memory between sessions.**
 
 ### Gate evidence at handoff
 
@@ -348,35 +272,6 @@ receipts are local execution evidence; summarize/link durable verification in
 Resolution for another machine's review. A legacy missing receipt is unknown,
 and the next stage needing a new handoff must create valid evidence.
 
-The review's **verdict** is one line, and it is the first line of the Resolution
-block: `Verdict: Approve`, or `Verdict: Needs your call: <one sentence why>`.
-The findings follow. "Needs your call" is for anything the reviewer is not
-confident about, including a small fix it made itself that it would rather have
-a human glance at. A wrong "Approve" costs more than a held ticket.
-
-Merge depends on the loop's base:
-
-**Into a session branch** (a `sweatshop/*` is open):
-
-1. Rebase the ticket branch onto the session. Verify gate evidence for that code;
-   reuse the green run if no production changed during rebase or review.
-2. A conflict inside the ticket's Primary files: resolve it. Outside them:
-   `Stage: blocked` with the conflict under `## Comments`, commit, stop.
-3. `git checkout <session>; git merge --no-ff <ticket branch>`, then the
-   Resolution block, the ledger line and `Stage: done` in one commit on the
-   session. No PR, no push: the driver pushes and opens the session PR when the
-   run stops, every verdict in its body. `Review:` holds nothing here.
-
-**Into the bindings' base** (no session), always through a PR:
-
-1. Rebase onto the base; verify gate evidence, push, `gh pr create`.
-2. Post the review as one PR comment, verdict first.
-3. `Review: agent` and the verdict is `Approve`: wait for CI
-   (`gh pr checks --watch`), then `gh pr merge --merge --delete-branch`, pull the
-   base branch, set `done` there with the ledger line. Never squash.
-4. `Review: human`, or the verdict is `Needs your call`: set `to-merge`, leave
-   the PR open, stop.
-
 ## Unattended runs
 
 The `sweatshop` skill's driver feeds bare ids to fresh Claude Code or Codex CLI
@@ -388,15 +283,14 @@ four things:
 - **A question goes to the proxy; only an escalation is a `blocked`.** There is
   no one to answer "which do you want?". Stage 2 that needs a decision (a seam
   the ticket does not name, a blank the spec left) asks the proxy first — see
-  "Asking the proxy" below. Only when the proxy escalates, or no proxy exists,
+  "Asking the proxy" below. Only when the proxy escalates or cannot be reached
   does it touch nothing, set `Stage: blocked` with the question under
   `## Comments`, commit, and stop. Stage 3 that is unsure writes `Needs your
   call` and finishes; it never ends at `reviewing` asking what to do.
 - **Nothing in the background.** A headless session ends when its turn does, and
   a gate or build left running in the background dies with it, unread. Run every
   command in the foreground and read its result before the next step.
-  Measured 2026-09-24: a PHY-23 review backgrounded the gate and ended at
-  `to-review` two minutes in.
+
 - **One stage per session.** Stage 2 stops the moment `to-review` is committed;
   it does not review its own work. Stage 3 stops at `done`, `to-merge`,
   `to-implement` or `blocked`, nothing else.
@@ -410,58 +304,51 @@ each answer into the ticket body (Primary files, a criterion, a filled blank),
 set `to-implement`, commit on the loop's base, run the driver again. Everything
 else about the driver — the session branch, the run log, how to start it — is in
 `sweatshop/SKILL.md`.
-
 ## Asking the proxy
 
 The human stops the loop only for what the human alone can decide. Everything
-else goes to the **proxy**: the `proxy` agent card (`agents/proxy.md` in this skills repo, linked as
-`~/.claude/agents/`; its model and effort live only there),
-a stand-in human on its own model. It holds in every stage and every session,
-attended or not.
+else goes to the **proxy**, a stand-in human: the card `sweatshop/proxy.md` in
+this skills repo, on the model its `model:` line names. One proxy for every stage
+and every runtime, attended or not, always through one script. Resolve
+`sweatshop/scripts/proxy.ps1` from this skills installation and run it in the
+foreground, through the Bash tool like the gate helper:
 
-1. **Spawn it** with the ticket id, the question as you would have written it
-   under `## Comments`, and the evidence you gathered (measurements, the options
-   you tried). It answers `Decision: …` or `Escalate: …` on its first line.
-2. **`Decision`**: record it under `## Comments` as `Proxy decided (<who>):
-   <answer> — <its reason, one line>`, where `<who>` names the model that
-   answered: `opus` for the card, `gpt-6-astra high, fallback` for item 4's
-   fallback. When the answer changes the contract, fold it into
-   the body the way stage 1 would (Primary files, a criterion, a filled blank).
-   Commit both with the next commit of the stage, then carry on as if the human
-   had answered.
-3. **`Escalate`**: the old path. `Stage: blocked`, the question and
-   `Proxy escalated (<who>): <why>` under `## Comments`, commit, stop.
-4. **No card, or a runtime without it** (Codex: it can spawn subagents, but it
-   does not read `~/.claude/agents/`, so the proxy card is not there). The
-   stage never decides with its own inherited model; it tries, in order
-   (a sandboxed Codex stage starts at 2: its sandbox has no network, so
-   `claude -p` only burns minutes on ECONNREFUSED):
-   1. **Claude**: `claude -p` with the text of `~/.claude/agents/proxy.md` as
-      the system prompt and the question plus evidence (ticket id, criterion,
-      the `## Comments` excerpt, the attempt's branch) as the prompt. Record as
-      `(opus)`. Failure from sandbox, network, credentials or a refused
-      escalation goes to 2.
-   2. **GPT-6 Astra high fallback**: spawn a subagent with model `gpt-6-astra`
-      and effort `high`, both set explicitly (never inherit the stage's model),
-      with the full text of `proxy.md` in its prompt (Codex does not read it on
-      its own) and the same question plus evidence. Record as
-      `(gpt-6-astra high, fallback)`. No subagent can be created: go to 3.
-   3. **The old path**: stop and ask, with no proxy line.
+    powershell -NoProfile -File <proxy.ps1> -Repo <worktree> -Ticket <ID> -Question '<question>'
 
-**Only an actual proxy answer earns `Proxy decided`.** The proxy is read-only
-and returns decision/draft text. The caller owns repository edits and commits,
-including copying that answer with its reason and attribution. A session's own judgement goes under
-`## Comments` in its own voice, and a session without a proxy asks by stopping.
-A decision made by the stage's own model, even through a subagent that
-inherited it, is not a proxy answer and never gets a proxy line.
-Measured 2026-09-30: a Codex stage 2 (PHY-43) wrote two `Proxy decided` lines
-for decisions no proxy had made. Measured 2026-10-15: a Codex stage 2
-(CONT-014) wrote two through a `/root/proxy` subagent on the stage's model.
+(`-QuestionFile <file>` for a long one.) Ask what you would have written under
+`## Comments`: the criterion, the options you tried, the evidence (measurements,
+the branch). The answer's first line is `Decision: …` or `Escalate: …`, and the
+script ends by printing the line to record.
+
+1. **`Decision`**: copy the printed `Proxy decided (<model>): … (receipt <path>)`
+   line under `## Comments` as is, with the drafts of the answer after it. When the
+   answer changes the contract, fold it into the body the way stage 1 would
+   (Primary files, a criterion, a filled blank). Commit both with the next commit
+   of the stage, then carry on as if the human had answered.
+2. **`Escalate`**: copy the printed `Proxy escalated (<model>): …` line, set
+   `Stage: blocked` with the question under `## Comments`, commit, stop.
+3. **The script fails** (any exit but 0: this session cannot reach the proxy, or
+   the call broke): set `Stage: blocked` with the question under `## Comments`,
+   commit, stop. Under the driver, the driver puts the question to the proxy from
+   outside the session and runs the stage again with the answer recorded.
+   Attended, show the failure and ask the human.
+
+**Only the script's line is a proxy line.** The driver checks every new
+`Proxy decided` or `Proxy escalated` line against its receipt (this ticket, that
+model) and parks the ticket when one does not match. Never write one yourself and
+never play the proxy through a subagent: a decision of your own goes under
+`## Comments` in your own voice.
+
+**A `Proxy decided` the driver recorded** carries the proxy's whole answer quoted
+under it. The next stage reads it as the human's answer: it folds a contract
+change into the body the way stage 1 would, then works.
 
 The proxy escalates only when there is no way forward without the human, or a
 wrong answer is irreversible or expensive to undo. Stage 3 names every `Proxy
-decided` line of the ticket in its findings and records the disclosure above,
-so the session PR shows the answer, evidence and integration/release impact.
+decided` line of the ticket in its findings, quoted in backticks or mid-sentence
+(a bullet that starts with `Proxy decided` reads as a new record and needs a
+receipt), and records the disclosure above, so the session PR shows the answer,
+evidence and integration/release impact.
 
 ## A repo with no bindings block
 
@@ -472,21 +359,28 @@ work. Do not copy this skill into the repo — one copy of the standard is the p
 
     - Gate: `<command that runs typecheck + lint + tests>`
     - Base branch: `<name>`
-    - Models: stage 1 <model>, stage 2 <model> [effort], stage 3 <model> [effort]
+    - Models (default): <lineup>
     - Models (<lineup>): stage 2 <model> [effort], hard <model> [effort], stage 3 <model> [effort]
+    - Test files: `<regex>`
 
-Cada linha `Models` é uma lineup. `Models:` (ou `Models (Claude):`) é a padrão do
-driver; `Models (<nome>):` é escolhida com `-Lineup <nome>`, e `Models (Codex):` é
-a do `sweatshop-codex.ps1`. O runtime segue o modelo, estágio por estágio (`gpt-*`
-roda no Codex, o resto no Claude Code), então uma lineup pode misturar os dois.
-Modelo Claude sempre com versão (`opus-5.5`, `sonnet-5`, `fable-5.1`; `opus 5.5`
-também serve): o driver recusa `opus` sozinho. Inclua só as lineups que o repo
-usa. O `[effort]` é opcional; sem ele, `high`.
+Each `Models (<name>):` line is a lineup, chosen with `-Lineup <name>`.
+`Models (default):` lists no models: it names the lineup the driver runs without
+`-Lineup`. `sweatshop-codex.ps1` runs `-Lineup sol`. A repo with no `default`
+falls back to the legacy `Models (Claude):`, then `Models:`. The runtime follows
+the model, stage by stage (`gpt-*` runs in Codex, the rest in Claude Code), so
+one lineup can mix both. Claude models always carry a version (`opus-5.5`,
+`sonnet-5`, `fable-5.1`; `opus 5.5` also works): the driver refuses a bare
+`opus`. Include only the lineups the repo uses. `[effort]` is optional; without
+it, `high`.
 
-`hard` é o implementador dos tickets `Difficulty: hard` e dos que já reabriram
-duas vezes; sem ele, o stage 2 implementa todos. Só o implementador muda: o
-revisor da lineup tem que bastar para qualquer ticket. O revisor mais caro fica
-para o PR `Review: human` e para as auditorias antes de release.
+`hard` is the implementer for `Difficulty: hard` tickets and for tickets that
+have reopened twice; without it, stage 2 implements them all. Only the
+implementer changes: the lineup's reviewer has to be enough for any ticket. The
+more expensive reviewer is kept for the `Review: human` PR and for pre-release
+audits.
+
+`Test files:` is optional: a regex for test fixtures kept beside production code,
+which a test-only commit may touch. The usual test paths need no line.
 
 Tracker paths and ticket shape do **not** go in this block. They are already in
 `docs/agents/issue-tracker.md`.

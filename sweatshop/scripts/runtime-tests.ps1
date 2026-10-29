@@ -45,6 +45,9 @@ try {
   [IO.File]::WriteAllText($batch, "@echo off`r`necho {`"type`":`"turn.completed`"}`r`n")
   $run = Invoke-StageProcess $batch '' $testRoot (Join-Path $testRoot 'batch.txt') 'Codex' 15
   Assert ($run.Result -eq 'exit 0' -and $run.CompletedUtc -and -not $run.InfrastructureError) 'Batch CLI path quoting failed'
+  # OpenCode (an npm .cmd) has no terminal event: its exit ends the stage.
+  $run = Invoke-StageProcess $batch '' $testRoot (Join-Path $testRoot 'opencode.txt') 'OpenCode' 15
+  Assert ($run.Result -eq 'exit 0' -and -not $run.CompletedUtc -and -not $run.InfrastructureError) 'OpenCode exit not the completion'
 
   $locked = Join-Path $testRoot 'locked.txt'
   [IO.File]::WriteAllText($locked, 'evidence')

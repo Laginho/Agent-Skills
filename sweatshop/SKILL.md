@@ -1,14 +1,15 @@
 ---
 name: sweatshop
-description: The unattended ticket-flow driver — runs fresh Claude Code or Codex CLI sessions, one stage at a time, and collects merged tickets in one session PR. Use when asked to start the driver ("roda o loop", "start the unattended run", "/sweatshop"), or to explain its run log or PR.
+description: The unattended ticket-flow driver — runs fresh Claude Code, Codex or OpenCode CLI sessions, one stage at a time, and collects merged tickets in one session PR. Use when asked to start the driver ("roda o loop", "start the unattended run", "/sweatshop"), or to explain its run log or PR.
 ---
 
 # Sweatshop
 
 `scripts/sweatshop.ps1 <repo> [-Lineup <name>]` runs the lineup's models: each
-stage on the runtime its model belongs to (`gpt-*` on Codex, the rest on Claude
-Code), so a lineup may pair a Codex implementer with a Claude reviewer.
-`scripts/sweatshop-codex.ps1 <repo>` is `-Lineup Codex`. It sends bare ids into a fresh CLI session, one stage at a
+stage on the runtime its model belongs to (`provider/model` on OpenCode, `gpt-*`
+on Codex, the rest on Claude Code), so a lineup may pair a Codex implementer with
+a Claude reviewer.
+`scripts/sweatshop-codex.ps1 <repo>` is `-Lineup sol`. It sends bare ids into a fresh CLI session, one stage at a
 time, then reads `Stage:` back. **The driver adds
 no instructions of its own.** Everything a session does, it does because
 `ticket-flow/SKILL.md` says so; this file owns only the driver.
@@ -21,7 +22,8 @@ no instructions of its own.** Everything a session does, it does because
    reparses the entry point once with all original arguments; the executing
    driver file's SHA256 is announced. Standalone copies skip update.
 2. **Preflight.** Clean tree, on the bindings' base branch, base pulled, no
-   ticket left `implementing` or `reviewing` by a run that died.
+   ticket left `implementing` or `reviewing` by a run that died. Before the first
+   stage it pings the proxy (see The proxy); no answer stops the run.
 3. **Picks the session.** A `sweatshop/*` branch not merged into the base —
    local or remote — is reused. None: `sweatshop/<yyyy-mm-dd>` is created from
    the base and pushed. It is checked out, and from here it is the loop's base:
@@ -65,6 +67,32 @@ edit big enough to matter is a `CLEAN-*` ticket, not a retrofit.
 The base moving while a session is open is not the driver's problem: the session
 meets it in the PR. With lanes, the foreman syncs the session with the base
 (`foreman`, section 9); what the sync cannot resolve is the human's call.
+
+## The proxy
+
+One stand-in human for every runtime: the card `proxy.md` beside this file, on
+the model its `model:` line names (any runtime's id; Claude ids pinned). Every
+caller, attended or not, reaches it through `scripts/proxy.ps1`, which runs that
+model's CLI read-only, prints the answer and the `Proxy decided (<model>)` or
+`Proxy escalated (<model>)` line to record, and writes a receipt under
+`%TEMP%\sweatshop-proxy\`. Changing the proxy's model is editing those two lines.
+
+- **Pings, before the first stage.** `proxy.ps1 -Ping` must answer
+  `Decision: pong`, or the run stops. Then, for each runtime in the lineup, a
+  short session with a stage's own flags runs the same ping from inside its
+  harness. A receipt means that runtime's stages call the proxy themselves; none
+  means they cannot (inside the Codex sandbox a nested `claude` call hangs), so they run with `SWEATSHOP_PROXY=driver`, where
+  `proxy.ps1` fails at once and the stage stops with its question. The `.out`
+  says which: `proxy from <runtime> sessions: reached directly | unreachable`.
+- **The driver answers a stage that asked.** A stage 2 that ends `blocked` or on a
+  question, with no `Proxy escalated` line of its own, has its question put to the
+  proxy by the driver. A `Decision` is recorded under `## Comments` with the whole
+  answer quoted, and the ticket goes back to `to-implement`; an `Escalate` is
+  recorded and the ticket stays `blocked` for the human. Twice per ticket per run;
+  a third ask waits for the human.
+- **Receipts are checked.** Every `Proxy decided` or `Proxy escalated` line a
+  stage adds must name a receipt for that ticket and that model, or the handoff
+  is parked like missing gate evidence. Older lines are history.
 
 ## What the driver writes
 
@@ -117,6 +145,10 @@ discovery uses `scripts/ticket-state.ps1`, shared with dispatch and standup;
 legacy asked branches and recovery names are preserved but excluded. Ambiguity,
 unmerged `done` and missing/stale gate evidence cannot unlock dependents. A bad
 stage handoff is parked with its work retained, rather than reported as merged.
+Two more handoff checks park the same way: a stage-2 commit that touches both test
+files and production (test paths, plus the binding's optional `Test files:` regex
+for fixtures kept beside production; the tracker counts as neither), and a proxy
+line without a matching receipt.
 
 `scripts/scoreboard.ps1 <repo> [<repo>...]` reads those logs across repos and
 prints two tables: one per implementer (stage runs, failed and asked attempts,
@@ -136,17 +168,19 @@ stand now; the log is what happened while nobody watched.
 ## Starting one
 
 Asked to start the driver, find the script next to this file — the user should
-never have to. In Claude Code run `scripts/sweatshop.ps1`; in Codex run
+never have to. In Claude Code or OpenCode run `scripts/sweatshop.ps1`; in Codex run
 `scripts/sweatshop-codex.ps1`. Resolve it from where this file was loaded; one
 recursive search from the skills directory if needed. Never select the runtime
-from which CLIs happen to be installed: both can be installed on one machine.
+from which CLIs happen to be installed: several can be installed on one machine.
 
 The target repo's `## Bindings do fluxo` block supplies the lineups, one
-`Models` line each. With no `-Lineup` the driver reads `Models (Claude):`, else
-`Models:`; `-Lineup night` reads `Models (night):` and never falls back. The
-driver refuses a missing line instead of guessing a model. Choosing the lineup:
+`Models (<name>)` line each. `Models (default): sol` names the lineup a run
+with no `-Lineup` takes; `-Lineup opus` reads `Models (opus):` and never falls
+back. A repo with no `default` line falls back to the legacy `Models (Claude):`,
+then `Models:`. The driver refuses a missing line instead of guessing a model.
+Choosing the lineup:
 
-- The user names a binding line ("the night lineup", "nightshift"): `-Lineup night`.
+- The user names a binding line ("the opus lineup", "run it on opus"): `-Lineup opus`.
 - The user spells out models ("luna max implements, opus 5.5 reviews"): pass them
   for this run only, in the binding's syntax:
   `-Models 'stage 2 gpt-6-luna max, stage 3 opus-5.5 high'`.
@@ -168,11 +202,25 @@ Claude models carry their version (`opus-5.5`, `sonnet-5`, `fable-5.1`,
 alias moves when a new model ships, and the lineup would change unannounced. For
 example:
 
-    - Models: stage 1 opus-5.5, stage 2 sonnet-5 high, hard opus-5.5 high, stage 3 opus-5.5 high
-    - Models (Codex): stage 1 gpt-6-sol, stage 2 gpt-6-luna high, stage 3 gpt-6-sol high
-    - Models (night): stage 2 gpt-6-luna max, stage 3 opus-5.5 high
+    - Models (default): sol
+    - Models (sol): stage 2 gpt-6.1-sol high, hard gpt-6.1-sol xhigh, stage 3 gpt-6.1-sol xhigh
+    - Models (opus): stage 2 opus-5.5 high, hard opus-5.5 xhigh, stage 3 opus-5.5 xhigh
 
 A mixed lineup needs both CLIs installed and logged in; the driver checks at start.
+
+Any model id with a slash runs on OpenCode, written as `opencode models` lists it
+(`stage 2 opencode/big-pickle`), so any provider OpenCode reaches works with no
+driver change. A reasoning variant rides in the id (`openai/gpt-6-sol#high`); the
+effort word is not sent, because a variant the model lacks is refused. Each stage
+runs `opencode run --standalone --auto --format json`: its own server, so a
+timeout kill stops the agent, and `--auto` approves every permission the OpenCode
+config does not deny (a denied one stays denied). OpenCode reads no global
+`CLAUDE.md`, so its prompt names the skill (`Use the ticket-flow skill on <id>.`):
+`ticket-flow` and the skills it calls must be installed under
+`~/.config/opencode/skills/` as junctions to this repo, never copies (a copy
+measured 2026-10-27 was five weeks stale). The cost column is OpenCode's own price
+per step; subagent sessions are not counted. An unknown model or variant stops the
+run instead of retrying.
 
 Codex stages run with `--approve-for-me`: the workspace-write sandbox, with
 every escalation judged by Codex's automatic reviewer instead of a human. On
@@ -184,7 +232,7 @@ fluxo` block; otherwise ask which. When asked to run, launch the selected script
 and show where its output lands. These are the corresponding commands:
 
     & "<skills-dir>\sweatshop\scripts\sweatshop.ps1" "<repo>"
-    & "<skills-dir>\sweatshop\scripts\sweatshop.ps1" "<repo>" -Lineup night
+    & "<skills-dir>\sweatshop\scripts\sweatshop.ps1" "<repo>" -Lineup opus
     & "<skills-dir>\sweatshop\scripts\sweatshop.ps1" "<repo>" -Models 'stage 2 gpt-6-luna max, stage 3 opus-5.5 high'
     & "<skills-dir>\sweatshop\scripts\sweatshop-codex.ps1" "<repo>"
     & "<skills-dir>\sweatshop\scripts\sweatshop.ps1" "<repo>\.artifacts-build\lanes\flutter" -Lane flutter
@@ -238,4 +286,6 @@ or authenticates no CLI) the first time a repo runs the loop. Local refs may be
 stale, which the preview states. `-SelfCheck` tests production functions in
 disposable fixtures without reading the supplied target. Both skip updates,
 target initialization and remote operations. `scripts/check.ps1` runs the full
-offline suite; it never launches the model pipeline.
+offline suite; it never launches the model pipeline. Its fake-runtime tests
+cover the proxy end to end: pings that reach and that do not, the driver
+answering asks until the third, receipts, and the test/production check.
