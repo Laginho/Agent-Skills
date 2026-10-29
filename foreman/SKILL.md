@@ -37,14 +37,19 @@ ticket, a dirty tree, a ticket at `implementing` or `reviewing`, or `blocked`
 tickets waiting on the human and nothing else runnable. The driver's Preflight
 would refuse the same things; you refuse them with the tree in view.
 
+Then the base's CI: `gh run list --branch <base> --limit 3 --json conclusion,status,displayTitle,createdAt,url`.
+Anything but `success` on the latest (a failure, or a job GitHub never started,
+as when it refuses one for billing) goes in chat and the notes before launch,
+and in the summary's **Your turn**: the session PR will merge into a base whose
+remote gate is not running. It does not stop the launch.
+
 Otherwise launch the runtime's driver (the script selected by `sweatshop`). In
 Claude Code, launch it as a **detached process** with its output in a file:
 
     Start-Process powershell -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','<script>','<repo>',<flags> -RedirectStandardOutput <tracker>/run-log/driver-<when>.out -RedirectStandardError <tracker>/run-log/driver-<when>.out.err -WindowStyle Hidden -PassThru
 
 Not a background Bash/PowerShell task: those die at their `timeout`, 2 h at
-most (measured 2026-10-03, it killed the driver mid-review; on 2026-10-02 one
-had lived 10 h). The detached driver does not show in the session's task pane;
+most. The detached driver does not show in the session's task pane;
 tell the human its pid and `.out` path. In Codex, a terminal session. A lineup the human asks for goes on the command line
 (`-Lineup` or `-Models`, as `sweatshop/SKILL.md` says), never into the binding;
 none asked for, run the default. A pause the human asks for is the driver's
@@ -52,8 +57,7 @@ none asked for, run the default. A pause the human asks for is the driver's
 launch time and the last row of `<tracker>/run-log.md`: everything after that row
 is this run. In Claude Code, the check-in clock is a background Bash
 `sleep 1800` that you re-arm on every wake: its completion notice always wakes
-you. Not `/loop` or a cron job: measured 2026-09-24, one never fired and nobody
-noticed for 30 minutes. In Codex, use a 30-minute thread heartbeat.
+you. Not `/loop` or a cron job, which can fail to fire with nobody noticing. In Codex, use a 30-minute thread heartbeat.
 
 **A driver already running** (the human or another session launched it before
 asking for you) is adopted, never relaunched: the standup's `implementing` ticket
@@ -66,14 +70,11 @@ notes file that the driver is adopted and where it runs.
 **Keep notes in a file**, `<tracker>/run-log/foreman-notes.md` (excluded with the
 rest of `run-log/`): one timestamped line per launch, stage row, cleanup, proxy
 call and human request, then a `## Pending` list of what the run still owes. A
-run outlives the session watching it; measured 2026-09-30, a Claude Code restart
-mid-run lost nothing because the notes held the launches, the pinned refs and
-the owed report. After a restart, read them first and resume from `## Pending`.
+run outlives the session watching it, and the notes are what survives a restart. After a restart, read them first and resume from `## Pending`.
 
 Never hold `<tracker>/run-log.md` open. On Windows a `tail -F` on it locks out
 the driver's `Add-Content`, and the driver crashes on its next row. `TaskStop`
-leaves the `tail` orphaned, so the lock outlives the monitor; measured
-2026-09-24, it crashed the driver twice. To watch, poll the driver's `.out` every
+leaves the `tail` orphaned, so the lock outlives the monitor. To watch, poll the driver's `.out` every
 30 s instead, from a background loop that exits on a new line (re-arm it each
 wake; it too dies at 2 h): it prints one line per finished stage
 (`<id> <stage> (<model>): <outcome>, $<cost>`) and every `throw`.
@@ -184,24 +185,24 @@ weekly reset) still stops it.
 
 The human's calls stay the human's: questions the proxy escalated, the session
 PR merge, any edit to code on the session branch other than section 9's sync. An edit you would have made is
-a line in the summary, not a commit. Subagents: only the proxy.
+a line in the summary, not a commit. No subagents: the proxy is
+`sweatshop/scripts/proxy.ps1` (`ticket-flow`, "Asking the proxy").
 
 **Push only the session branch and the base.** Never push a ticket branch, even
 after committing a diagnosis on it: review rebases ticket branches locally, and a
-stale `origin` copy makes the branch ambiguous to every reader. Measured
-2026-10-11: one `git push origin EDIT-001` tacked onto a commit stopped the run
-overnight. A hook in `~/.claude/settings.json` refuses it too.
+stale `origin` copy makes the branch ambiguous to every reader. A hook in `~/.claude/settings.json` refuses it too.
 
 **A `blocked` ticket with no `Proxy escalated` line is not the human's yet.**
-It came from a runtime or a session that did not ask the proxy. Spawn the repo's
-`proxy` agent with the ticket id, the question and the evidence from `## Comments`
-and the stage's `.txt`, plus the branch the driver kept for the attempt
-(`recovery/asked/<when>/<ID>`, or a legacy `<branch>-asked-<when>`, named in the `Attempt N stopped to ask` line), so the
-answer can say "resume from it" instead of starting over. Follow
-`ticket-flow`'s "Asking the proxy": record
-`Proxy decided (opus)` (folded into the body when it changes the contract) and set
-`to-implement`, or record `Proxy escalated (opus)`. Commit on the session branch, then
-relaunch the driver once the run is over. A relaunch for proxy answers is not
+The driver already puts a stage's question to the proxy during the run; what is
+left came from a third ask in one run, a proxy call that failed, or an older run.
+Run `sweatshop/scripts/proxy.ps1` with the ticket id and a question built from
+`## Comments` and the stage's `.txt`, plus the branch the driver kept for the
+attempt (`recovery/asked/<when>/<ID>`, or a legacy `<branch>-asked-<when>`, named
+in the `Attempt N stopped to ask` line), so the answer can say "resume from it"
+instead of starting over. Follow `ticket-flow`'s "Asking the proxy": record the
+printed `Proxy decided` line (folded into the body when it changes the contract)
+and set `to-implement`, or record the printed `Proxy escalated` line. Commit on
+the session branch, then relaunch the driver once the run is over. A relaunch for proxy answers is not
 the one restart of section 3.
 
 ## 5. Summary (when the task ends)
@@ -213,8 +214,7 @@ Every run, report or not, commits the run log. The driver keeps
 `<tracker>/run-log.md` out of git on purpose (it resets the tree between
 stages), so that file lives on one disk only, and it is what the scoreboard
 compares models from. Merge it into `docs/run-log/run-log.md`, never copy over
-it: the copy can hold rows another machine logged (measured 2026-10-02, a copy
-over it would have deleted 38). Append this run's rows to the copy, then copy
+it: the copy can hold rows another machine logged. Append this run's rows to the copy, then copy
 the merged file back over the local log, so both disks start the next run with
 the whole history. Commit the copy on the session branch and on the base branch,
 both pushed, in the same commits as the report when there is one. Never
@@ -258,10 +258,12 @@ check from product goals, not another entire ticket review or full gate run.
   Link the report's PDF when there is one, with its two commits (section 7,
   **Record**).
 - **Foreman** — restarts, cleanups, every `Proxy decided` line grouped by who
-  decided (`opus`, `gpt-6-astra high, fallback`; a line without `(<who>)` is
-  legacy, unknown), anything you noticed and left alone. A proxy line written by
-  the stage's own model (ticket-flow, "Asking the proxy") is not a proxy
-  decision: list it apart, as the stage's judgement. Record interventions once in `<tracker>/interventions.md`:
+  decided (the model in its parentheses; older lines say `opus` or
+  `gpt-6-astra high, fallback`, and a line without `(<who>)` is legacy, unknown),
+  anything you noticed and left alone. Count the ones the driver answered for a
+  runtime that could not reach the proxy (its `proxy from <runtime> sessions` line
+  in the `.out`). An older proxy line with no receipt, written by the stage's own
+  model, is not a proxy decision: list it apart, as the stage's judgement. Record interventions once in `<tracker>/interventions.md`:
   `| When | Ticket | Kind | Evidence |`, with an ISO timestamp, ticket id or `-`,
   and a link to the note/commit. Kind is `human-rescue` (unplanned human work to
   unblock execution), `routine-approval` (the intended merge/release decision),
@@ -286,8 +288,7 @@ review row of this run gets each of its findings labelled, so the scoreboard can
 charge the implementer only for what was the implementer's.
 
 A review that merges can hide the same miss: it writes the missing test or meets
-the criterion itself instead of reopening (measured 2026-10-02, Opus 5.5 xhigh did
-this on 4 of 5 merges and the scoreboard read 0 %). Every finding a merging
+the criterion itself instead of reopening. Every finding a merging
 review fixed in a commit of its own, and that adds proof or behaviour (a test, a
 criterion met, a red run the record lacked; not a comment or a rename), gets a
 row too, with `Round` `0`. The scoreboard counts those apart, as fixed in review.
@@ -321,7 +322,7 @@ GPT-6 Astra at medium effort, read-only, with this rubric and the evidence paths
     codex exec -C <repo> -m gpt-6-astra -c model_reasoning_effort=medium -c approval_policy='"never"' --sandbox read-only --color never --output-last-message <scratch>/<id>-r<n>.md "<rubric + evidence>" < /dev/null
 
 Close its stdin as above: with stdin open, `codex exec` prints "Reading additional
-input from stdin..." and waits forever (measured 2026-10-02, 10 min lost).
+input from stdin..." and waits forever.
 
 Its labels go in as returned. You may add a line of disagreement in the report,
 never change the row.
@@ -384,8 +385,7 @@ across runs. Fewer than three: the summary is enough.
   report was not recorded.
 - **Build:** any LaTeX engine on the PATH (`tectonic -X compile <file>.tex`).
   Recompile until there are no overfull-box warnings. None: Codex's bundled
-  Tectonic under `~/.codex/.tmp/`, which a `codex update` can delete (measured
-  2026-10-01). Still none: commit the `.tex`, say so in the summary, and offer to
+  Tectonic under `~/.codex/.tmp/`, which a `codex update` can delete. Still none: commit the `.tex`, say so in the summary, and offer to
   download Tectonic from its GitHub release into a folder on the PATH.
 - **Shape:** the newest report in `docs/relatorios/` is the template; keep its
   sections so runs compare side by side. Without one: summary (produced, cost,
@@ -394,8 +394,8 @@ across runs. Fewer than three: the summary is enough.
   went and what was wasted, comparison with the previous runs from `run-log.md`,
   observations per model, driver and runtime issues, numbered recommendations,
   every `Débito humano:` line of the run, and every `Proxy decided` line of the
-  run's tickets, quoted per ticket with who decided (Opus, the GPT-6 Astra
-  fallback, or legacy unknown). Those are the calls made on the human's
+  run's tickets, quoted per ticket with who decided (the model in the line,
+  or legacy unknown). Those are the calls made on the human's
   behalf; a count without the text sends them hunting through the tickets.
 - **What was done:** right after the summary, one short paragraph per ticket the
   run worked on, for a reader who never opened the tickets (a ticket's title and

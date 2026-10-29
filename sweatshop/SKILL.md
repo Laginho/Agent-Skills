@@ -22,7 +22,8 @@ no instructions of its own.** Everything a session does, it does because
    reparses the entry point once with all original arguments; the executing
    driver file's SHA256 is announced. Standalone copies skip update.
 2. **Preflight.** Clean tree, on the bindings' base branch, base pulled, no
-   ticket left `implementing` or `reviewing` by a run that died.
+   ticket left `implementing` or `reviewing` by a run that died. Before the first
+   stage it pings the proxy (see The proxy); no answer stops the run.
 3. **Picks the session.** A `sweatshop/*` branch not merged into the base —
    local or remote — is reused. None: `sweatshop/<yyyy-mm-dd>` is created from
    the base and pushed. It is checked out, and from here it is the loop's base:
@@ -66,6 +67,32 @@ edit big enough to matter is a `CLEAN-*` ticket, not a retrofit.
 The base moving while a session is open is not the driver's problem: the session
 meets it in the PR. With lanes, the foreman syncs the session with the base
 (`foreman`, section 9); what the sync cannot resolve is the human's call.
+
+## The proxy
+
+One stand-in human for every runtime: the card `proxy.md` beside this file, on
+the model its `model:` line names (any runtime's id; Claude ids pinned). Every
+caller, attended or not, reaches it through `scripts/proxy.ps1`, which runs that
+model's CLI read-only, prints the answer and the `Proxy decided (<model>)` or
+`Proxy escalated (<model>)` line to record, and writes a receipt under
+`%TEMP%\sweatshop-proxy\`. Changing the proxy's model is editing those two lines.
+
+- **Pings, before the first stage.** `proxy.ps1 -Ping` must answer
+  `Decision: pong`, or the run stops. Then, for each runtime in the lineup, a
+  short session with a stage's own flags runs the same ping from inside its
+  harness. A receipt means that runtime's stages call the proxy themselves; none
+  means they cannot (inside the Codex sandbox a nested `claude` call hangs), so they run with `SWEATSHOP_PROXY=driver`, where
+  `proxy.ps1` fails at once and the stage stops with its question. The `.out`
+  says which: `proxy from <runtime> sessions: reached directly | unreachable`.
+- **The driver answers a stage that asked.** A stage 2 that ends `blocked` or on a
+  question, with no `Proxy escalated` line of its own, has its question put to the
+  proxy by the driver. A `Decision` is recorded under `## Comments` with the whole
+  answer quoted, and the ticket goes back to `to-implement`; an `Escalate` is
+  recorded and the ticket stays `blocked` for the human. Twice per ticket per run;
+  a third ask waits for the human.
+- **Receipts are checked.** Every `Proxy decided` or `Proxy escalated` line a
+  stage adds must name a receipt for that ticket and that model, or the handoff
+  is parked like missing gate evidence. Older lines are history.
 
 ## What the driver writes
 
@@ -118,6 +145,10 @@ discovery uses `scripts/ticket-state.ps1`, shared with dispatch and standup;
 legacy asked branches and recovery names are preserved but excluded. Ambiguity,
 unmerged `done` and missing/stale gate evidence cannot unlock dependents. A bad
 stage handoff is parked with its work retained, rather than reported as merged.
+Two more handoff checks park the same way: a stage-2 commit that touches both test
+files and production (test paths, plus the binding's optional `Test files:` regex
+for fixtures kept beside production; the tracker counts as neither), and a proxy
+line without a matching receipt.
 
 `scripts/scoreboard.ps1 <repo> [<repo>...]` reads those logs across repos and
 prints two tables: one per implementer (stage runs, failed and asked attempts,
@@ -255,4 +286,6 @@ or authenticates no CLI) the first time a repo runs the loop. Local refs may be
 stale, which the preview states. `-SelfCheck` tests production functions in
 disposable fixtures without reading the supplied target. Both skip updates,
 target initialization and remote operations. `scripts/check.ps1` runs the full
-offline suite; it never launches the model pipeline.
+offline suite; it never launches the model pipeline. Its fake-runtime tests
+cover the proxy end to end: pings that reach and that do not, the driver
+answering asks until the third, receipts, and the test/production check.

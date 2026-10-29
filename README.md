@@ -11,7 +11,7 @@ Six skills for coding agents. Provider-agnostic: a skill is a folder with a
 | [`foreman`](foreman/SKILL.md) | Supervises one `sweatshop` run: standup, a background driver, 30-minute check-ins, crash handling, and a closing summary for the human. |
 | [`scout`](scout/SKILL.md) | Says which `sweatshop` lanes can start now beside the running ones: work ready, no driver on the clone, no overlap in `Primary files`. Read-only, launches nothing. |
 | [`sweatshop`](sweatshop/SKILL.md) | The unattended driver for `ticket-flow`: launches fresh Claude Code, Codex or OpenCode CLI sessions, one stage at a time, each on the runtime its lineup model belongs to, collect merged tickets on one `sweatshop/*` branch, and open a single PR. |
-| [`grill-proxy`](grill-proxy/SKILL.md) | Grilling where the `proxy` agent answers the routine questions of each round and only design, taste and irreversible calls reach the human. Wraps the vendored `grilling` skill; `ticket-flow` stage 1 uses it. |
+| [`grill-proxy`](grill-proxy/SKILL.md) | Grilling where the proxy (`sweatshop/scripts/proxy.ps1`) answers the routine questions of each round and only design, taste and irreversible calls reach the human. Wraps the vendored `grilling` skill; `ticket-flow` stage 1 uses it. |
 
 All are user-invoked (`/audit`, `/standup`, `/ticket-flow` or a bare ticket id, `/sweatshop`, `/foreman`, `/scout`, `/grill-proxy`), never fired automatically — except `grill-proxy`, which `ticket-flow` stage 1 also calls.
 
@@ -61,9 +61,9 @@ Copy with `cp -r audit standup ticket-flow sweatshop foreman scout grill-proxy <
 PowerShell, `Copy-Item audit,standup,ticket-flow,sweatshop,foreman,scout,grill-proxy <dir> -Recurse`.
 
 Check `grill-proxy/SKILL.md` is discoverable under `~/.agents/skills/` for Codex
-too. Codex uses the wrapper's documented plain-`grilling` fallback when it cannot
-spawn the named Claude proxy; its answers then come from the human. If the
-wrapper is missing, ticket-flow explicitly supports that same fallback.
+too. When the proxy script fails, the wrapper falls back to plain `grilling`, with
+answers from the human. If the wrapper is missing, ticket-flow supports that same
+fallback.
 
 `sweatshop` updates itself with `git pull` on every run, but only when it runs
 from a checkout of this repo. To get that, keep the clone and symlink instead of
@@ -73,17 +73,16 @@ A plain copy works too; it skips update, including a tracked copy under another
 project's `.claude/skills/`. Only the tracked `sweatshop/scripts/` source layout
 updates its own checkout; junctions resolve to that source.
 
-### 3b. The `proxy` agent (Claude Code)
+### 3b. The proxy
 
-`agents/proxy.md` is the provisional human that `ticket-flow` and `foreman` ask
-before stopping for the user. Its model and effort live only in its frontmatter:
-to change them, edit those two lines here and nowhere else. Link the folder so
-every machine runs the same card after a `git pull`:
-`New-Item -ItemType Junction "$env:USERPROFILE\.claude\agents" -Target "<clone>\agents"`
-(`ln -s <clone>/agents ~/.claude/agents` elsewhere). Codex cannot spawn it.
-The proxy card is read-only: it returns decisions and drafts; its caller owns
-edits/commits and attributes only actual proxy answers. Compare an existing
-local card before synchronizing it so a safer local contract is preserved.
+`sweatshop/proxy.md` is the provisional human that `ticket-flow`, `grill-proxy`
+and `foreman` ask before stopping for the user. Every caller, in any runtime,
+reaches it through `sweatshop/scripts/proxy.ps1`, which runs the card's model
+read-only and writes a receipt the driver checks. Its model and effort live only
+in the card's frontmatter (any runtime's id; Claude ids pinned to a version): edit
+those two lines to change the proxy everywhere, and `git pull` carries it to every
+machine with the rest of `sweatshop`. Nothing to link: an older install's
+`~/.claude/agents` junction to this repo's `agents/` can go.
 
 ### 4. Report back
 

@@ -1,6 +1,6 @@
 ---
 name: grill-proxy
-description: Grilling with a stand-in human — the `proxy` agent answers the routine questions of each round, and only design, taste and irreversible calls reach the human. Use when ticket-flow stage 1 grills, or when the user asks for a grill through the proxy or with /grill-proxy.
+description: Grilling with a stand-in human — the proxy (`sweatshop/scripts/proxy.ps1`) answers the routine questions of each round, and only design, taste and irreversible calls reach the human. Use when ticket-flow stage 1 grills, or when the user asks for a grill through the proxy or with /grill-proxy.
 ---
 
 # Grill through the proxy
@@ -13,11 +13,15 @@ fit this; what this skill adds is defined here.
 
 1. Build the round as `grilling` says: the whole frontier, numbered, each
    question with your recommended answer.
-2. **Spawn the `proxy` agent once for the whole round**, not once per question.
-   Give it the plan being grilled, every decision already settled (and who
-   settled it), the round itself, and the rule below, word for word. It answers
-   one line per question: `Q<n> Decision: <answer> — <reason>` or
-   `Q<n> Escalate: <why>`.
+2. **Ask the proxy once for the whole round**, not once per question: run
+   `sweatshop/scripts/proxy.ps1` from this skills installation, in the
+   foreground, with `-Ticket` set to the feature's name and `-QuestionFile` a
+   file outside the repo holding the plan being grilled, every decision already
+   settled (and who settled it), the round itself, and the rule below, word for
+   word. Ask for a first line `Decision: <k> settled, <m> escalated`, then one
+   line per question: `Q<n> Decision: <answer> — <reason>` or
+   `Q<n> Escalate: <why>`. The receipt line it prints is for tickets; a grill
+   needs none.
 3. Show the human only the escalated questions, in the `grilling` format. Under
    them, list what the proxy settled, one line each:
 
@@ -50,6 +54,5 @@ stays theirs.
 - **The human closes the session.** When the frontier is empty, list every
   decision the proxy made in one block and wait for the human to confirm the
   shared understanding. Nothing is acted on before that.
-- **No proxy, or a runtime that cannot spawn one** (Codex): plain `grilling`,
-  every question to the human. Never answer a question yourself and present it
-  as the proxy's.
+- **The script fails** (any exit but 0): plain `grilling`, every question to
+  the human. Never answer a question yourself and present it as the proxy's.

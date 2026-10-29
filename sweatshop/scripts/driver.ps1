@@ -30,6 +30,7 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'stage-runtime.ps1')
 . (Join-Path $PSScriptRoot 'ticket-state.ps1') -Repo $Repo
 . (Join-Path $PSScriptRoot 'gate-evidence.ps1') -Repo $Repo
+. (Join-Path $PSScriptRoot 'proxy.ps1') -Repo $Repo
 Set-Location $Repo
 $Repo = (Get-Location).Path
 if ($Lane -and -not $SelfCheck -and -not (Test-Path "$Tracker/$Lane/issues")) { throw "Lane '$Lane': no $Tracker/$Lane/issues in $Repo." }
@@ -63,11 +64,11 @@ $block = (Get-Content $agents -Raw -Encoding UTF8) -split '(?m)^## ' | Where-Obj
 if (-not $block) { throw "No '## Bindings do fluxo' block in $agents" }
 $Gate   = [regex]::Match($block, 'Gate:\s*`([^`]+)`').Groups[1].Value
 $Base   = [regex]::Match($block, 'Base branch:\s*`([^`]+)`').Groups[1].Value
-# The runtime follows the model, stage by stage, so one lineup can pair a Codex
-# implementer with a Claude reviewer.
-# ponytail: a name prefix; give the binding a runtime column if a family ever runs on both.
-# OpenCode ids are `provider/model`; no Claude or Codex name has a slash.
-function RuntimeOf($model) { if ($model -match '/') { 'OpenCode' } elseif ($model -match '^gpt-') { 'Codex' } else { 'Claude' } }
+# What a test-only commit may touch. `Test files:` adds a repo's fixtures that live beside
+# production (EasyMath's shared JSON cases); the tracker is metadata, allowed in any commit.
+$TestFiles = '(?i)(^|/)(tests?|__tests__|__snapshots__|fixtures|integration_test|androidTest|e2e)/|[._-](test|spec)\.[^/.]+$|(^|/)test_[^/]+$'
+$extraTests = [regex]::Match($block, 'Test files:\s*`([^`]+)`').Groups[1].Value
+if ($extraTests) { $TestFiles += "|$extraTests" }
 # `opus 5.5` and `opus-5.5` both read as `opus-5.5`, the bench's label; effort is
 # optional and defaults to high. A trailing `fast` (Codex's /fast, the priority tier)
 # logs as `<model>-fast`: another row in the scoreboard, and `?` cost until priced.
@@ -83,8 +84,6 @@ function StageModel($line, $n) {
   else { (($m.Groups[1].Value -replace ' ', '-').ToLower() -replace '^claude-([a-z]+)-(\d+)-(\d+)$', '$1-$2.$3' -replace '^claude-', '') + $(if ($m.Groups[3].Success) { '-fast' }) }
   if ($m.Groups[2].Success) { $m.Groups[2].Value } else { 'high' }
 }
-# What `claude --model` takes: `opus-5.5` is `claude-opus-5-5`. Codex names pass as written.
-function CliModel($model) { if ($model -match '^(gpt-|claude-)') { $model } else { 'claude-' + ($model -replace '\.', '-') } }
 
 # A lineup is one `Models (<name>):` line. `Models (default): <name>` names the
 # lineup a run without -Lineup takes. Only the default falls back to the legacy
@@ -113,30 +112,6 @@ foreach ($m in @($Model2, $Model3, $ModelHard) | Where-Object { $_ }) {
 }
 
 # --- CLIs -------------------------------------------------------------------------
-function FindCli($runtime) {
-  $probe = if ($runtime -eq 'Claude') {
-    # `claude` may not be on PATH: probe the installs the app and the CLI use.
-    "$env:APPDATA\Claude\claude-code\*\claude.exe"
-    "$env:USERPROFILE\AppData\Roaming\Claude\claude-code\*\claude.exe"
-    "$env:USERPROFILE\.local\bin\claude.exe"
-    "$env:APPDATA\npm\claude.cmd"
-  } elseif ($runtime -eq 'OpenCode') {
-    "$env:APPDATA\npm\opencode.cmd"
-    "$env:USERPROFILE\.opencode\bin\opencode.exe"
-  } else {
-    "$env:LOCALAPPDATA\Programs\OpenAI\Codex\bin\codex.exe"
-    "$env:LOCALAPPDATA\OpenAI\Codex\bin\*\codex.exe"
-    "$env:APPDATA\npm\codex.cmd"
-  }
-  $exe = (Get-Command $runtime.ToLower() -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
-  if (-not $exe) {
-    $exe = $probe | ForEach-Object { Get-ChildItem $_ -ErrorAction SilentlyContinue } |
-      Sort-Object { try { [version]$_.Directory.Name } catch { [version]"0.0.0" } } |
-      Select-Object -Last 1 -ExpandProperty FullName
-  }
-  if (-not $exe) { throw "No $runtime CLI found. Tried PATH and:`n  $($probe -join "`n  ")" }
-  $exe
-}
 $Cli = @{}
 foreach ($rt in @($Model2, $Model3, $ModelHard) | Where-Object { $_ -and -not ($DryRun -or $SelfCheck) } | ForEach-Object { RuntimeOf $_ } | Select-Object -Unique) {
   $Cli[$rt] = FindCli $rt
@@ -308,12 +283,11 @@ function NextTicket {
 }
 
 # --- one fresh CLI session -------------------------------------------------------
-function RunStage($t, $model, $effort, $minutes, $label) {
-  $log = Join-Path $RunDir ("{0}-{1}-{2}.txt" -f $t.Id, $label, (Get-Date -Format yyyyMMdd-HHmmss))
-  $rt = RuntimeOf $model; $exe = $Cli[$rt]
-  $cliArgs = if ($rt -eq 'Claude') {
+# A ticket stage and the proxy ping run with the same flags, so the ping proves what stages get.
+function StageArgs($rt, $model, $effort, $prompt, $title, $final) {
+  if ($rt -eq 'Claude') {
     # JSON for the usage; its `result` goes to `.final`, the same place Codex puts its last message.
-    "-p `"$($t.Id)`" --model $(CliModel $model) --effort $effort --output-format json --permission-mode acceptEdits --allowedTools $Allowed"
+    "-p `"$prompt`" --model $(CliModel $model) --effort $effort --output-format json --permission-mode acceptEdits --allowedTools $Allowed"
   } elseif ($rt -eq 'OpenCode') {
     # OpenCode takes its project from an inherited PWD over its real cwd; a driver launched
     # from Git Bash ran stage 2 in the shell's repo (measured 2026-10-27).
@@ -323,20 +297,31 @@ function RunStage($t, $model, $effort, $minutes, $label) {
     # No effort flag: a variant is model-specific (`#high` is refused where the model has
     # none), so it rides in the model id. It reads no global CLAUDE.md, so the bare-id
     # rule is not there: name the skill (routing, not behaviour; measured 2026-10-27).
-    "run --standalone --auto --format json --model $model --title `"$($t.Id) $label`" `"Use the ticket-flow skill on $($t.Id).`""
+    "run --standalone --auto --format json --model $model --title `"$title`" `"$prompt`""
   } else {
     # Sandboxed, with escalations judged by Codex's automatic reviewer: the Windows
     # workspace-write sandbox keeps .git read-only and cannot reach the keyring, so
     # git and gh fail once and pass on the approved retry (measured 2026-10-02).
     $tier = if ($model -match '-fast$') { ' --config service_tier=fast' }
-    "exec --model $($model -replace '-fast$') --config model_reasoning_effort=$effort$tier --approve-for-me --json --output-last-message `"$log.final`" `"$($t.Id)`""
+    "exec --model $($model -replace '-fast$') --config model_reasoning_effort=$effort$tier --approve-for-me --json --output-last-message `"$final`" `"$prompt`""
   }
+}
+
+function RunStage($t, $model, $effort, $minutes, $label) {
+  $log = Join-Path $RunDir ("{0}-{1}-{2}.txt" -f $t.Id, $label, (Get-Date -Format yyyyMMdd-HHmmss))
+  $rt = RuntimeOf $model; $exe = $Cli[$rt]
+  $prompt = if ($rt -eq 'OpenCode') { "Use the ticket-flow skill on $($t.Id)." } else { $t.Id }
+  $cliArgs = StageArgs $rt $model $effort $prompt "$($t.Id) $label" "$log.final"
   Say "$($t.Id) $label ($model $effort, ${minutes}m) -> $log"
   if ($DryRun) { Say "$exe $cliArgs"; return 'dry-run' }
   $script:LastLog = $log; $script:LastUsage = $null
   $script:LastInfrastructureError = $null
   $script:LastFailureKind = 'infrastructure'
+  # Only commits this stage makes face the test/production check: a reopen keeps the last pass.
+  $from = & git rev-parse -q --verify "$($t.Branch)^{commit}" 2>$null
+  $env:SWEATSHOP_PROXY = if ($script:ProxyVia -and $script:ProxyVia[$rt] -eq 'driver') { 'driver' } else { $null }
   $run = Invoke-StageProcess $exe $cliArgs $Repo $log $rt ($minutes * 60)
+  $env:SWEATSHOP_PROXY = $null
   $script:LastInfrastructureError = $run.InfrastructureError
   $script:LastShutdownSeconds = $run.ShutdownSeconds
   try {
@@ -358,6 +343,8 @@ function RunStage($t, $model, $effort, $minutes, $label) {
       try {
         $handoff = Ticket (Join-Path $Repo $t.File)
         if ($handoff.HandoffError) { throw $handoff.HandoffError }
+        Assert-ProxyReceipts $t.Id $t.Text $handoff.Text
+        if ($label -eq 'implement' -and $handoff.Stage -eq 'to-review') { Assert-TestFirst $handoff $from }
         if ($handoff.Stage -in 'to-review', 'done', 'to-merge') {
           $ref = if ($handoff.Stage -eq 'done') { $Loop } else { $handoff.Branch }
           Assert-GateEvidence $handoff $ref
@@ -369,6 +356,18 @@ function RunStage($t, $model, $effort, $minutes, $label) {
     }
   } catch { $script:LastInfrastructureError = "Stage evidence unavailable: $($_.Exception.Message)" }
   return $run.Result
+}
+
+# Test-first, checked by a script rather than by the reviewer reading `diff --stat`: each
+# commit the stage made is test-only or production-only. The tracker is metadata, allowed in either.
+function Assert-TestFirst($t, $from) {
+  $range = @($t.Branch, "^$Loop") + @(if ($from) { "^$from" })
+  $mixed = foreach ($c in @(GitOk rev-list --no-merges @range)) {
+    $files = @(GitOk -c core.quotepath=false diff-tree --no-commit-id --name-only -r $c | Where-Object { $_ -notlike "$Tracker/*" })
+    $tests = @($files | Where-Object { $_ -match $TestFiles }); $prod = @($files | Where-Object { $_ -notmatch $TestFiles })
+    if ($tests -and $prod) { '{0} mixes {1} with {2}' -f $c.Substring(0, 8), $tests[0], $prod[0] }
+  }
+  if ($mixed) { throw "test and production in one commit: $($mixed -join '; '). Split it; a test fixture kept beside production goes in the binding's ``Test files:``." }
 }
 
 # A runtime/logging failure parks only this ticket; its evidence survives reset.
@@ -437,14 +436,6 @@ function RolloutUsage($file) {
     try { $e = $lines[$i] | ConvertFrom-Json } catch { continue }
     if ($e.type -eq 'event_msg' -and $e.payload.info) { return $e.payload.info.total_token_usage }
   }
-}
-# OpenCode's last `text` event is the session's last message; it has no `result` line.
-function OpenCodeFinal($text) {
-  $last = ''
-  foreach ($l in $text -split "`n") {
-    if ($l -like '{"type":"text"*') { try { $last = ($l | ConvertFrom-Json).part.text } catch { } }
-  }
-  $last
 }
 function Usage($log, $model) {
   $text = (Read-StageLog $log)
@@ -602,10 +593,12 @@ function Reset-Tree($t, [switch]$DropBranch) {
 }
 
 # Append to `## Comments` on the loop base and commit (the driver's only edits).
-function Note($t, $line, $stage) {
+# $details (a proxy's full answer) goes quoted under the line.
+function Note($t, $line, $stage, $details) {
   $text = Get-Content $t.File -Raw -Encoding UTF8
   if ($text -notmatch '(?m)^## Comments') { $text = $text.TrimEnd() + "`n`n## Comments`n" }
   $text = $text.TrimEnd() + "`n`n- $(Get-Date -Format yyyy-MM-dd) $line`n"
+  if ($details) { $text += (@($details -split '\r?\n' | ForEach-Object { "  > $_" }) -join "`n") + "`n" }
   if ($stage) { $text = $text -replace '(?m)^(\*{0,2}Stage\*{0,2}:\*{0,2})\s*.+$', "`$1 $stage" }
   [IO.File]::WriteAllText((Join-Path $Repo $t.File), $text, [Text.UTF8Encoding]::new($false))
   # -F, not -m: a log tail with quotes or `--flags` inside splits into git options under PS 5.1.
@@ -615,6 +608,58 @@ function Note($t, $line, $stage) {
   [IO.File]::WriteAllText($msg, "chore: $subject ($($t.Id))$(if ($body) { "`n`nLog tail: $body" })", [Text.UTF8Encoding]::new($false))
   GitOk add $t.File; GitOk commit -q -F $msg | Out-Null
   GitOk push -q
+}
+
+# --- the proxy ------------------------------------------------------------------------
+# Live checks before the first stage: the proxy answers, and each runtime of the lineup can
+# reach it from inside its own session, with a stage's own flags. A runtime that cannot runs
+# its stages with SWEATSHOP_PROXY=driver: proxy.ps1 fails there at once, the stage stops with
+# its question, and Answer-Asked puts it to the proxy from here, outside any sandbox.
+function Ping-Proxy {
+  $p = Invoke-Proxy $Repo $null $null -Ping -minutes 10
+  if ($p.Decision -notmatch '^pong\W*$') { throw "Proxy ping: $($p.Who) answered '$($p.Decision)', not pong. Receipt $($p.Receipt)" }
+  Say "proxy: $($p.Who) answered the ping"
+  $script:ProxyVia = @{}
+  foreach ($pair in @(@($Model2, $Effort2), @($Model3, $Effort3), @($ModelHard, $EffortHard))) {
+    $model = $pair[0]; if (-not $model) { continue }
+    $rt = RuntimeOf $model; if ($script:ProxyVia.Contains($rt)) { continue }
+    $log = Join-Path $RunDir ('ping-{0}-{1}.txt' -f $rt, (Get-Date -Format yyyyMMdd-HHmmss))
+    $since = Get-Date
+    $cmd = "powershell -NoProfile -ExecutionPolicy Bypass -File $ProxyScript -Repo $Repo -Ping"
+    $prompt = "Connectivity check from the sweatshop driver, not a ticket: read nothing and change nothing. Run exactly this one command and reply with its output: $cmd"
+    # shortcut: the command rides unquoted in the prompt; a path with spaces needs quoting here.
+    $run = Invoke-StageProcess $Cli[$rt] (StageArgs $rt $model 'low' $prompt 'proxy ping' "$log.final") $Repo $log $rt 600
+    $why = Refused $log
+    if ($run.InfrastructureError -or $why) { throw "$rt ($model) failed its ping session: $($run.InfrastructureError)$why. Log $log" }
+    if (GitOk status --porcelain) { Reset-Tree $null }
+    # Only a receipt counts, not the run files a call that hung leaves beside it.
+    $reached = @(Get-ChildItem $ProxyDir -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '-ping-[0-9a-f]{6}\.json$' -and $_.LastWriteTime -gt $since })
+    $script:ProxyVia[$rt] = if ($reached) { 'stage' } else { 'driver' }
+    Say "proxy from $rt sessions: $(if ($reached) { 'reached directly' } else { "unreachable; the driver asks for them (log $log)" })"
+  }
+}
+
+# An asking attempt's branch, renamed out of the ticket's way. Under its own name it would keep
+# its stale `blocked` (an unmerged branch's Stage wins over the session's), so an answer on the
+# session would never run; a reopened ticket's branch, holding the last pass, included.
+function Keep-Asked($t) {
+  if (-not (git branch --list $t.Branch)) { return '' }
+  $kept = "recovery/asked/$(Get-Date -Format yyyyMMdd-HHmmss)/$($t.Id)"
+  GitOk branch -q -m $t.Branch $kept | Out-Null
+  " (its commits are on branch ``$kept``)"
+}
+
+# A stage that stopped to ask, with no proxy escalation of its own, gets the proxy's answer
+# here; a Decision sends it back to stage 2. Twice per ticket per run at most.
+function Answer-Asked($t, $before, $question) {
+  if (@(New-ProxyLines $before $t.Text | Where-Object { $_.Groups[1].Value -eq 'escalated' }).Count) { return }
+  if (-not $script:Asked) { $script:Asked = @{} }
+  if (++$script:Asked[$t.Id] -gt 2) { Say "$($t.Id): asked a third time this run; left for a human"; return }
+  $q = "Stage 2 of $($t.Id) stopped to ask; it could not reach you itself. Its last message:`n`n$question`n`nYour answer is recorded under the ticket's ## Comments and stage 2 runs again."
+  try { $p = Invoke-Proxy $Repo $t.Id $q }
+  catch { Say "$($t.Id): the driver could not reach the proxy: $($_.Exception.Message)"; return }
+  if ($p.Kind -eq 'decided') { Note $t $p.Line 'to-implement' $p.Answer } else { Note $t $p.Line $null $p.Answer }
+  Say "$($t.Id): $($p.Line)"
 }
 
 # One row per stage, not per ticket: the model and the time it burned are the two
@@ -926,6 +971,8 @@ Say "Gate '$Gate', base '$Base', lineup '$LineupName': stage 2 $Model2 $Effort2 
 try {
 while (-not (StopAsked) -and ($t = NextTicket)) {
   $attempt = 1 + ((Get-Content $t.File -Raw -Encoding UTF8) | Select-String -AllMatches 'Attempt \d+ failed').Matches.Count
+  if (-not $script:ProxyVia) { Ping-Proxy }
+  $before = $t.Text
   if ($t.Stage -eq 'to-implement') {
     # A reopened ticket's branch holds the previous pass (tests + code): only a
     # branch this attempt created is safe to drop.
@@ -949,15 +996,10 @@ while (-not (StopAsked) -and ($t = NextTicket)) {
       if ($why -eq 'asked') {
         # Keep what the attempt built, under another name. Measured 2026-09-30: four asks
         # lost their diagnosis and mutate-verify tables with the dropped branch, and the
-        # answers said "resume from these commits". Under the ticket's own name, the next
-        # stage 2 would check it out, read its stale `Stage:` and stop.
-        $kept = ''
-        if (-not $hadBranch -and (git branch --list $t.Branch)) {
-          $kept = "recovery/asked/$(Get-Date -Format yyyyMMdd-HHmmss)/$($t.Id)"
-          GitOk branch -q -m $t.Branch $kept | Out-Null
-          $kept = " (its commits are on branch ``$kept``)"
-        }
-        Note $t "Attempt $attempt stopped to ask$($kept): $tail" 'blocked'; LogStage $t 'implement' $impl $attempt 'asked, blocked' $started; continue
+        # answers said "resume from these commits".
+        $kept = Keep-Asked $t
+        Note $t "Attempt $attempt stopped to ask$($kept): $tail" 'blocked'; LogStage $t 'implement' $impl $attempt 'asked, blocked' $started
+        Answer-Asked $t $before $tail; continue
       }
       if ($attempt -ge 2) { Note $t "Attempt $attempt failed: $res; blocked after two attempts. Log tail: $tail" 'blocked'; LogStage $t 'implement' $impl $attempt "failed ($res), blocked" $started }
       else { Note $t "Attempt $attempt failed: $res. Log tail: $tail"; LogStage $t 'implement' $impl $attempt "failed ($res), will retry" $started }

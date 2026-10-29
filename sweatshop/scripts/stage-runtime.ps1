@@ -72,3 +72,43 @@ function Invoke-StageProcess($Exe, $Arguments, $WorkingDirectory, $Log, $Runtime
   [IO.File]::WriteAllText("$Log.runtime.json", ($record | ConvertTo-Json))
   $record
 }
+
+# --- runtimes: shared by the driver and proxy.ps1 -----------------------------------
+# The runtime follows the model, so one lineup can pair a Codex implementer with a Claude reviewer.
+# ponytail: a name prefix; give the binding a runtime column if a family ever runs on both.
+# OpenCode ids are `provider/model`; no Claude or Codex name has a slash.
+function RuntimeOf($model) { if ($model -match '/') { 'OpenCode' } elseif ($model -match '^gpt-') { 'Codex' } else { 'Claude' } }
+# What `claude --model` takes: `opus-5.5` is `claude-opus-5-5`. Codex names pass as written.
+function CliModel($model) { if ($model -match '^(gpt-|claude-)') { $model } else { 'claude-' + ($model -replace '\.', '-') } }
+function FindCli($runtime) {
+  $probe = if ($runtime -eq 'Claude') {
+    # `claude` may not be on PATH: probe the installs the app and the CLI use.
+    "$env:APPDATA\Claude\claude-code\*\claude.exe"
+    "$env:USERPROFILE\AppData\Roaming\Claude\claude-code\*\claude.exe"
+    "$env:USERPROFILE\.local\bin\claude.exe"
+    "$env:APPDATA\npm\claude.cmd"
+  } elseif ($runtime -eq 'OpenCode') {
+    "$env:APPDATA\npm\opencode.cmd"
+    "$env:USERPROFILE\.opencode\bin\opencode.exe"
+  } else {
+    "$env:LOCALAPPDATA\Programs\OpenAI\Codex\bin\codex.exe"
+    "$env:LOCALAPPDATA\OpenAI\Codex\bin\*\codex.exe"
+    "$env:APPDATA\npm\codex.cmd"
+  }
+  $exe = (Get-Command $runtime.ToLower() -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+  if (-not $exe) {
+    $exe = $probe | ForEach-Object { Get-ChildItem $_ -ErrorAction SilentlyContinue } |
+      Sort-Object { try { [version]$_.Directory.Name } catch { [version]"0.0.0" } } |
+      Select-Object -Last 1 -ExpandProperty FullName
+  }
+  if (-not $exe) { throw "No $runtime CLI found. Tried PATH and:`n  $($probe -join "`n  ")" }
+  $exe
+}
+# OpenCode's last `text` event is the session's last message; it has no `result` line.
+function OpenCodeFinal($text) {
+  $last = ''
+  foreach ($l in $text -split "`n") {
+    if ($l -like '{"type":"text"*') { try { $last = ($l | ConvertFrom-Json).part.text } catch { } }
+  }
+  $last
+}
