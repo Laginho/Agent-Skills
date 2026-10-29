@@ -763,6 +763,9 @@ function SessionBody {
   if ($context) { $body += "`n`n## Updated ticket context (excluded from completed count)`n`n" + (PrBody $context) }
   $body
 }
+# The repo leads the title: with several projects' session PRs in one inbox, a bare
+# `sweatshop: sweatshop/2026-10-29-1430` named no project.
+function SessionTitle($origin, $branch) { (($origin -replace '[\\/]+$' -replace '\.git$') -split '[\\/:]')[-1] + ': ' + ($branch -replace '/', ' ') }
 # Opened when the run stops, never earlier: nobody reviews half a session. Body
 # regenerated every time, so a second run on the same session just grows the list.
 function Publish-Session {
@@ -775,8 +778,9 @@ function Publish-Session {
   # ends saying "session PR:" with nothing after the colon.
   $url = gh pr list --head $Loop --base $Base --state open --json url --jq '.[0].url'
   if ($LASTEXITCODE) { throw "gh pr list exited $LASTEXITCODE" }
-  if ($url) { gh pr edit $url --body-file $body | Out-Null }
-  else { $url = gh pr create --base $Base --head $Loop --title "sweatshop: $Loop" --body-file $body }
+  $title = SessionTitle (GitOk remote get-url origin) $Loop
+  if ($url) { gh pr edit $url --title $title --body-file $body | Out-Null }
+  else { $url = gh pr create --base $Base --head $Loop --title $title --body-file $body }
   if ($LASTEXITCODE) { throw "gh exited $LASTEXITCODE; body kept at $body" }
   Say "session PR ($($done.Count) tickets): $url"
 }
@@ -818,6 +822,11 @@ if ($SelfCheck) {
                       @('* **Gate evidence:** C:\t\r.json', 'C:\t\r.json'), @('Gate evidence: C:\a (x86)\r.json', 'C:\a (x86)\r.json'),
                       @('- Gate evidence: C:\a (x86)\r.json (gate 119/0 (full))', 'C:\a (x86)\r.json'), @('Gate evidence: C:\t\receipt (1)', 'C:\t\receipt (1)'))) {
     if ((GateEvidenceField "# T-1: x`nStage: to-review`n$($case[0])`n") -ne $case[1]) { throw "GateEvidenceField: $($case[0])" }
+  }
+  foreach ($case in @(@('https://github.com/Laginho/Agent-Skills.git', 'sweatshop/2026-10-29-1430', 'Agent-Skills: sweatshop 2026-10-29-1430'),
+                      @('git@github.com:Laginho/P-Chess.git', 'sweatshop/ui/2026-10-29-1430', 'P-Chess: sweatshop ui 2026-10-29-1430'),
+                      @('C:\t\target-origin.git\','sweatshop/x', 'target-origin: sweatshop x'))) {
+    if ((SessionTitle $case[0] $case[1]) -ne $case[2]) { throw "SessionTitle: $($case[0])" }
   }
   # Verdict decides whether an attempt is spent; the shapes are the two real logs of 2026-09-14.
   $tmp = Join-Path $env:TEMP "sweatshop-verdict-$PID.txt"

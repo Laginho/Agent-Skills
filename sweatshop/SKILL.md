@@ -48,6 +48,10 @@ new session, because the old one is now merged and the search skips it.
 
 ## The session PR
 
+Titled with the repo first, `<repo>: <session branch>` with slashes as spaces
+(`Agent-Skills: sweatshop 2026-10-29-1430`), so an inbox of several projects'
+session PRs says which project each is. Every publish rewrites the title too.
+
 One line per ticket that reached `done` on the session — id, `Review:`, verdict
 — with the ones that want a human first: `Needs your call` and `Review: human`
 at the top, `Approve` from `Review: agent` below. That order is the whole point:
