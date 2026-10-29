@@ -60,6 +60,14 @@ in chat, not a file.
      `Stage` value, never the flattened `open`.
    - **The tracker is not only on the checked-out branch.** See step 2; every read
      in this step goes through the branch it picks, not the working tree.
+   - **Read headers in one pass, never one process per file.** A tracker can hold
+     hundreds of tickets, and on Windows every spawned process (`git show`, `grep`,
+     `sed` in a shell loop) costs tens of milliseconds: a per-file loop takes
+     minutes and hits the tool timeout. When the loop's base is the checked-out
+     branch and up to date, one Grep over `.scratch/**/issues/*.md` for
+     `Stage:|Status:|Priority:|Blocked by:|Deferral:` reads every header at once.
+     For another branch, pipe the paths into one `git cat-file --batch` (each line
+     `<branch>:<path>`) and parse the stream in a single script.
    - `ledger.md` is a recent-activity log. Column layout varies by repo and it may be
      a bare table (`date | ID | commit`) with no prose. Read the last rows for IDs and
      dates; cross-reference the IDs against `git log` to learn what each one was.
