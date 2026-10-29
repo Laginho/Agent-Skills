@@ -763,6 +763,9 @@ function SessionBody {
   if ($context) { $body += "`n`n## Updated ticket context (excluded from completed count)`n`n" + (PrBody $context) }
   $body
 }
+# The repo leads the title: with several projects' session PRs in one inbox, a bare
+# `sweatshop: sweatshop/2026-10-29-1430` named no project.
+function SessionTitle($origin, $branch) { (($origin -replace '([\\/]|\.git)+$') -split '[\\/:]')[-1] + ': ' + ($branch -replace '/', ' ') }
 # Opened when the run stops, never earlier: nobody reviews half a session. Body
 # regenerated every time, so a second run on the same session just grows the list.
 function Publish-Session {
@@ -775,8 +778,9 @@ function Publish-Session {
   # ends saying "session PR:" with nothing after the colon.
   $url = gh pr list --head $Loop --base $Base --state open --json url --jq '.[0].url'
   if ($LASTEXITCODE) { throw "gh pr list exited $LASTEXITCODE" }
-  if ($url) { gh pr edit $url --body-file $body | Out-Null }
-  else { $url = gh pr create --base $Base --head $Loop --title "sweatshop: $Loop" --body-file $body }
+  $title = SessionTitle (GitOk remote get-url origin) $Loop
+  if ($url) { gh pr edit $url --title $title --body-file $body | Out-Null }
+  else { $url = gh pr create --base $Base --head $Loop --title $title --body-file $body }
   if ($LASTEXITCODE) { throw "gh exited $LASTEXITCODE; body kept at $body" }
   Say "session PR ($($done.Count) tickets): $url"
 }
@@ -819,6 +823,24 @@ if ($SelfCheck) {
                       @('- Gate evidence: C:\a (x86)\r.json (gate 119/0 (full))', 'C:\a (x86)\r.json'), @('Gate evidence: C:\t\receipt (1)', 'C:\t\receipt (1)'))) {
     if ((GateEvidenceField "# T-1: x`nStage: to-review`n$($case[0])`n") -ne $case[1]) { throw "GateEvidenceField: $($case[0])" }
   }
+  foreach ($case in @(@('https://github.com/Laginho/Agent-Skills.git', 'sweatshop/2026-10-29-1430', 'Agent-Skills: sweatshop 2026-10-29-1430'),
+                      @('git@github.com:Laginho/P-Chess.git', 'sweatshop/ui/2026-10-29-1430', 'P-Chess: sweatshop ui 2026-10-29-1430'),
+                      @('C:\t\target-origin.git\','sweatshop/x', 'target-origin: sweatshop x'), @('C:\r\Agent-Skills\.git\', 'sweatshop/x', 'Agent-Skills: sweatshop x'))) {
+    if ((SessionTitle $case[0] $case[1]) -ne $case[2]) { throw "SessionTitle: $($case[0])" }
+  }
+  # The title must reach gh on create and on edit, or an old or hand-made title stays.
+  foreach ($existing in '', 'https://x/pull/1') {
+    $seen = @{}
+    & {
+      function git { '1' }; function GitOk { if ($args[0] -eq 'remote') { 'git@github.com:o/Agent-Skills.git' } }
+      function CompletedTickets { }; function SessionBody { 'b' }; function Say { }
+      function gh { $global:LASTEXITCODE = 0; if ($args[1] -eq 'list') { $existing } else { $seen.args = $args } }
+      $Loop = 'sweatshop/2026-10-29'; $Base = 'main'; Publish-Session
+    }
+    $verb = if ($existing) { 'edit' } else { 'create' }
+    if ($seen.args[1] -ne $verb -or $seen.args[[array]::IndexOf($seen.args, '--title') + 1] -ne 'Agent-Skills: sweatshop 2026-10-29') { throw "Publish-Session title on ${verb}: $($seen.args)" }
+  }
+  Remove-Item (Join-Path $env:TEMP "sweatshop-pr-$PID.md") -ErrorAction SilentlyContinue
   # Verdict decides whether an attempt is spent; the shapes are the two real logs of 2026-09-14.
   $tmp = Join-Path $env:TEMP "sweatshop-verdict-$PID.txt"
   foreach ($case in @(@("API Error: Unable to connect to API (ENOTFOUND)`n", 'api-error'),
