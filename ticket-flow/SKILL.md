@@ -362,6 +362,7 @@ work. Do not copy this skill into the repo — one copy of the standard is the p
     - Models (default): <lineup>
     - Models (<lineup>): stage 2 <model> [effort], hard <model> [effort], stage 3 <model> [effort]
     - Test files: `<regex>`
+    - Sync gate: `<command>` (optional: a fuller gate the foreman runs once per session, at the sync)
 
 Each `Models (<name>):` line is a lineup, chosen with `-Lineup <name>`.
 `Models (default):` lists no models: it names the lineup the driver runs without
