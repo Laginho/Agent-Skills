@@ -37,7 +37,8 @@ function Invoke-StageProcess($Exe, $Arguments, $WorkingDirectory, $Log, $Runtime
     if (-not ('SweatshopStageProcess' -as [type])) { Add-Type -Path (Join-Path $PSScriptRoot 'StageProcess.cs') }
     $owner = [SweatshopStageProcess]::Start($Exe, $Arguments, $WorkingDirectory, $Log)
     do {
-      if (-not $completed) {
+      # OpenCode has no terminal event: its exit is the completion, so skip reading its large log.
+      if (-not $completed -and $Runtime -ne 'OpenCode') {
         # Claude emits one JSON object, Codex JSONL. Read the whole Claude result.
         $tail = if ($Runtime -eq 'Codex') { 65536 } else { 0 }
         if (Test-StageCompleted (Read-StageLog $Log $tail) $Runtime) { $completed = [datetime]::UtcNow }

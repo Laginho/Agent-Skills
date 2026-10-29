@@ -1,13 +1,14 @@
 ---
 name: sweatshop
-description: The unattended ticket-flow driver — runs fresh Claude Code or Codex CLI sessions, one stage at a time, and collects merged tickets in one session PR. Use when asked to start the driver ("roda o loop", "start the unattended run", "/sweatshop"), or to explain its run log or PR.
+description: The unattended ticket-flow driver — runs fresh Claude Code, Codex or OpenCode CLI sessions, one stage at a time, and collects merged tickets in one session PR. Use when asked to start the driver ("roda o loop", "start the unattended run", "/sweatshop"), or to explain its run log or PR.
 ---
 
 # Sweatshop
 
 `scripts/sweatshop.ps1 <repo> [-Lineup <name>]` runs the lineup's models: each
-stage on the runtime its model belongs to (`gpt-*` on Codex, the rest on Claude
-Code), so a lineup may pair a Codex implementer with a Claude reviewer.
+stage on the runtime its model belongs to (`provider/model` on OpenCode, `gpt-*`
+on Codex, the rest on Claude Code), so a lineup may pair a Codex implementer with
+a Claude reviewer.
 `scripts/sweatshop-codex.ps1 <repo>` is `-Lineup sol`. It sends bare ids into a fresh CLI session, one stage at a
 time, then reads `Stage:` back. **The driver adds
 no instructions of its own.** Everything a session does, it does because
@@ -136,10 +137,10 @@ stand now; the log is what happened while nobody watched.
 ## Starting one
 
 Asked to start the driver, find the script next to this file — the user should
-never have to. In Claude Code run `scripts/sweatshop.ps1`; in Codex run
+never have to. In Claude Code or OpenCode run `scripts/sweatshop.ps1`; in Codex run
 `scripts/sweatshop-codex.ps1`. Resolve it from where this file was loaded; one
 recursive search from the skills directory if needed. Never select the runtime
-from which CLIs happen to be installed: both can be installed on one machine.
+from which CLIs happen to be installed: several can be installed on one machine.
 
 The target repo's `## Bindings do fluxo` block supplies the lineups, one
 `Models (<name>)` line each. `Models (default): sol` names the lineup a run
@@ -175,6 +176,20 @@ example:
     - Models (opus): stage 2 opus-5.5 high, hard opus-5.5 xhigh, stage 3 opus-5.5 xhigh
 
 A mixed lineup needs both CLIs installed and logged in; the driver checks at start.
+
+Any model id with a slash runs on OpenCode, written as `opencode models` lists it
+(`stage 2 opencode/big-pickle`), so any provider OpenCode reaches works with no
+driver change. A reasoning variant rides in the id (`openai/gpt-6-sol#high`); the
+effort word is not sent, because a variant the model lacks is refused. Each stage
+runs `opencode run --standalone --auto --format json`: its own server, so a
+timeout kill stops the agent, and `--auto` approves every permission the OpenCode
+config does not deny (a denied one stays denied). OpenCode reads no global
+`CLAUDE.md`, so its prompt names the skill (`Use the ticket-flow skill on <id>.`):
+`ticket-flow` and the skills it calls must be installed under
+`~/.config/opencode/skills/` as junctions to this repo, never copies (a copy
+measured 2026-10-27 was five weeks stale). The cost column is OpenCode's own price
+per step; subagent sessions are not counted. An unknown model or variant stops the
+run instead of retrying.
 
 Codex stages run with `--approve-for-me`: the workspace-write sandbox, with
 every escalation judged by Codex's automatic reviewer instead of a human. On

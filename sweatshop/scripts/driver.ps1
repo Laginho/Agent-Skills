@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
   Sweatshop: the unattended ticket-flow driver. Feeds bare ticket ids to fresh
-  Claude Code or Codex CLI sessions, implement then review, and reads `Stage:` back.
+  Claude Code, Codex or OpenCode CLI sessions, implement then review, and reads `Stage:` back.
   Merged tickets collect on one `sweatshop/*` session branch; one PR at the end.
   Adds no instructions of its own: behaviour lives in ticket-flow/SKILL.md.
 
@@ -66,7 +66,8 @@ $Base   = [regex]::Match($block, 'Base branch:\s*`([^`]+)`').Groups[1].Value
 # The runtime follows the model, stage by stage, so one lineup can pair a Codex
 # implementer with a Claude reviewer.
 # ponytail: a name prefix; give the binding a runtime column if a family ever runs on both.
-function RuntimeOf($model) { if ($model -match '^gpt-') { 'Codex' } else { 'Claude' } }
+# OpenCode ids are `provider/model`; no Claude or Codex name has a slash.
+function RuntimeOf($model) { if ($model -match '/') { 'OpenCode' } elseif ($model -match '^gpt-') { 'Codex' } else { 'Claude' } }
 # `opus 5.5` and `opus-5.5` both read as `opus-5.5`, the bench's label; effort is
 # optional and defaults to high. A trailing `fast` (Codex's /fast, the priority tier)
 # logs as `<model>-fast`: another row in the scoreboard, and `?` cost until priced.
@@ -74,10 +75,12 @@ function RuntimeOf($model) { if ($model -match '^gpt-') { 'Codex' } else { 'Clau
 # $n is a stage number, or `hard` for the implementer of hard tickets.
 function StageModel($line, $n) {
   $key = if ("$n" -match '^\d+$') { "stage $n" } else { $n }
-  $m = [regex]::Match("$line", "\b$key (\w[\w.-]*(?: \d+(?:\.\d+)*)?)(?: (low|medium|high|xhigh|max|ultra))?( fast)?")
+  $m = [regex]::Match("$line", "\b$key (\w[\w./#-]*(?: \d+(?:\.\d+)*)?)(?: (low|medium|high|xhigh|max|ultra))?( fast)?")
   if (-not $m.Success) { return $null }
+  # An OpenCode id goes to its CLI as written: a provider's ids may be mixed-case.
+  if ($m.Groups[1].Value -match '/') { $m.Groups[1].Value + $(if ($m.Groups[3].Success) { '-fast' }) }
   # One label per model in the run log: `claude-opus-5-5` from a binding reads as `opus-5.5`.
-  (($m.Groups[1].Value -replace ' ', '-').ToLower() -replace '^claude-([a-z]+)-(\d+)-(\d+)$', '$1-$2.$3' -replace '^claude-', '') + $(if ($m.Groups[3].Success) { '-fast' })
+  else { (($m.Groups[1].Value -replace ' ', '-').ToLower() -replace '^claude-([a-z]+)-(\d+)-(\d+)$', '$1-$2.$3' -replace '^claude-', '') + $(if ($m.Groups[3].Success) { '-fast' }) }
   if ($m.Groups[2].Success) { $m.Groups[2].Value } else { 'high' }
 }
 # What `claude --model` takes: `opus-5.5` is `claude-opus-5-5`. Codex names pass as written.
@@ -105,7 +108,7 @@ if (-not ($Gate -and $Base -and $Model2 -and $Model3)) { throw "Bindings block i
 # An unversioned alias moves when Anthropic ships the next model, and the lineup
 # changes under a run with nobody told. Pin it.
 foreach ($m in @($Model2, $Model3, $ModelHard) | Where-Object { $_ }) {
-  if ((RuntimeOf $m) -eq 'Claude' -and $m -match '-fast$') { throw "fast is Codex's service tier; '$m' runs on Claude." }
+  if ((RuntimeOf $m) -ne 'Codex' -and $m -match '-fast$') { throw "fast is Codex's service tier; '$m' runs on $(RuntimeOf $m)." }
   if ((RuntimeOf $m) -eq 'Claude' -and $m -notmatch '\d') { throw "Claude model '$m' has no version. Write it as opus-5.5, sonnet-5, fable-5.1 or haiku-4.5." }
 }
 
@@ -117,6 +120,9 @@ function FindCli($runtime) {
     "$env:USERPROFILE\AppData\Roaming\Claude\claude-code\*\claude.exe"
     "$env:USERPROFILE\.local\bin\claude.exe"
     "$env:APPDATA\npm\claude.cmd"
+  } elseif ($runtime -eq 'OpenCode') {
+    "$env:APPDATA\npm\opencode.cmd"
+    "$env:USERPROFILE\.opencode\bin\opencode.exe"
   } else {
     "$env:LOCALAPPDATA\Programs\OpenAI\Codex\bin\codex.exe"
     "$env:LOCALAPPDATA\OpenAI\Codex\bin\*\codex.exe"
@@ -308,6 +314,16 @@ function RunStage($t, $model, $effort, $minutes, $label) {
   $cliArgs = if ($rt -eq 'Claude') {
     # JSON for the usage; its `result` goes to `.final`, the same place Codex puts its last message.
     "-p `"$($t.Id)`" --model $(CliModel $model) --effort $effort --output-format json --permission-mode acceptEdits --allowedTools $Allowed"
+  } elseif ($rt -eq 'OpenCode') {
+    # OpenCode takes its project from an inherited PWD over its real cwd; a driver launched
+    # from Git Bash ran stage 2 in the shell's repo (measured 2026-10-27).
+    $env:PWD = $Repo
+    # Its own server per stage (--standalone), so a timeout kill stops the agent too, and
+    # not the user's background service. --auto approves what the config does not deny.
+    # No effort flag: a variant is model-specific (`#high` is refused where the model has
+    # none), so it rides in the model id. It reads no global CLAUDE.md, so the bare-id
+    # rule is not there: name the skill (routing, not behaviour; measured 2026-10-27).
+    "run --standalone --auto --format json --model $model --title `"$($t.Id) $label`" `"Use the ticket-flow skill on $($t.Id).`""
   } else {
     # Sandboxed, with escalations judged by Codex's automatic reviewer: the Windows
     # workspace-write sandbox keeps .git read-only and cannot reach the keyring, so
@@ -328,8 +344,9 @@ function RunStage($t, $model, $effort, $minutes, $label) {
       try { $j = (Read-StageLog $log) | ConvertFrom-Json } catch { $j = $null }
       if ($j) { [IO.File]::WriteAllText("$log.final", "$($j.result)") }
     }
+    if ($rt -eq 'OpenCode') { [IO.File]::WriteAllText("$log.final", (OpenCodeFinal (Read-StageLog $log))) }
     $script:LastUsage = Usage $log $model
-    if ($null -ne $run.ExitCode -and $run.ExitCode -ne 0 -and ($rt -eq 'Codex' -or -not $j -or $j.num_turns -le 1)) {
+    if ($null -ne $run.ExitCode -and $run.ExitCode -ne 0 -and ($rt -ne 'Claude' -or -not $j -or $j.num_turns -le 1)) {
       Add-Content $log "`nAPI Error: $rt exited $($run.ExitCode)`n$(Read-StageLog "$log.err")"
     }
     # A stage is handed off by commits, never by a dirty Stage: line or final message.
@@ -421,8 +438,29 @@ function RolloutUsage($file) {
     if ($e.type -eq 'event_msg' -and $e.payload.info) { return $e.payload.info.total_token_usage }
   }
 }
+# OpenCode's last `text` event is the session's last message; it has no `result` line.
+function OpenCodeFinal($text) {
+  $last = ''
+  foreach ($l in $text -split "`n") {
+    if ($l -like '{"type":"text"*') { try { $last = ($l | ConvertFrom-Json).part.text } catch { } }
+  }
+  $last
+}
 function Usage($log, $model) {
   $text = (Read-StageLog $log)
+  if ((RuntimeOf $model) -eq 'OpenCode') {
+    # OpenCode prices each step itself; `input` excludes cache reads (measured 2026-10-27).
+    # shortcut: subagent (task tool) sessions are not in this stream; read them from opencode.db if they matter.
+    # shortcut: Out adds reasoning as if OpenCode reports it apart; unchecked against a paid bill, cost is unaffected.
+    $s = @(foreach ($l in $text -split "`n") {
+      if ($l -like '{"type":"step_finish"*') { try { ($l | ConvertFrom-Json).part } catch { } }
+    })
+    if (-not $s) { return $null }
+    $t = @($s | ForEach-Object tokens); $c = @($t | ForEach-Object cache)
+    $cached = Sum $c 'read'
+    return [pscustomobject]@{ In = (Sum $t 'input') + $cached + (Sum $c 'write'); Cached = $cached
+                              Out = (Sum $t 'output') + (Sum $t 'reasoning'); Cost = Sum $s 'cost' }
+  }
   if ((RuntimeOf $model) -eq 'Claude') {
     try { $j = $text | ConvertFrom-Json } catch { return $null }
     $m = @($j.modelUsage.PSObject.Properties | ForEach-Object Value)   # every model, subagents included
@@ -488,6 +526,9 @@ function Refused($log) {
   $text = (Read-StageLog $log)
   if ($text.Length -gt 2000) { $text = $text.Substring($text.Length - 2000) }
   $m = [regex]::Match($text, 'invalid_request_error\\?"\s*,\s*\\?"message\\?"\s*:\s*\\?"(.+?)\\?"')
+  if ($m.Success) { return $m.Groups[1].Value }
+  # OpenCode's unknown model or variant (measured 2026-10-27): a typo, never an outage.
+  $m = [regex]::Match($text, '"provider\.no-route","message":"(.+?)"')
   if ($m.Success) { $m.Groups[1].Value }
 }
 # ponytail: only the "at h:mm AM" shape waits; a dated reset (weekly limit) still stops the run.
@@ -750,8 +791,10 @@ if ($SelfCheck) {
   if ((Refused $tmp) -ne "The 'gpt-6.1-sol' model is not supported.") { throw "Refused: got $(Refused $tmp)" }
   [IO.File]::WriteAllText($tmp, "{`"type`":`"error`",`"message`":`"Selected model is at capacity. Please try a different model.`"}`n")
   if ($null -ne (Refused $tmp)) { throw 'Refused: a capacity error is an outage' }
+  [IO.File]::WriteAllText($tmp, "{`"type`":`"error`",`"timestamp`":1,`"sessionID`":`"ses_x`",`"error`":{`"type`":`"provider.no-route`",`"message`":`"Model unavailable: nope/nothing`"}}`n`nAPI Error: OpenCode exited 1`n")
+  if ((Refused $tmp) -ne 'Model unavailable: nope/nothing') { throw "Refused: OpenCode no-route got $(Refused $tmp)" }
   # A mixed lineup routes each stage by its model; a wrong route runs the wrong CLI.
-  foreach ($case in @(@('gpt-6-luna', 'Codex'), @('gpt-6-sol', 'Codex'), @('opus', 'Claude'), @('claude-opus-5-5', 'Claude'), @('sonnet', 'Claude'))) {
+  foreach ($case in @(@('gpt-6-luna', 'Codex'), @('gpt-6-sol', 'Codex'), @('opus', 'Claude'), @('claude-opus-5-5', 'Claude'), @('sonnet', 'Claude'), @('opencode/big-pickle', 'OpenCode'), @('openai/gpt-6-sol', 'OpenCode'))) {
     if ((RuntimeOf $case[0]) -ne $case[1]) { throw "RuntimeOf: $($case[0]) should run on $($case[1])" }
   }
   # The binding's spelling, the run log's label and the CLI's id must stay one model.
@@ -761,6 +804,8 @@ if ($SelfCheck) {
   if ("$(StageModel 'stage 2 claude-opus-5-5 high, stage 3 claude-sonnet-5' 2) / $(StageModel 'stage 2 claude-opus-5-5 high, stage 3 claude-sonnet-5' 3)" -ne 'opus-5.5 high / sonnet-5 high') { throw 'StageModel: a claude- id must log as its short name' }
   if ("$(StageModel 'stage 2 gpt-6.1-sol high fast, hard gpt-6.1-sol fast' 2) / $(StageModel 'stage 2 gpt-6.1-sol high fast, hard gpt-6.1-sol fast' 'hard')" -ne 'gpt-6.1-sol-fast high / gpt-6.1-sol-fast high') { throw 'StageModel: fast' }
   if ($null -ne (StageModel 'stage 2 opus-5.5' 3)) { throw 'StageModel: an absent stage must be $null' }
+  $l = 'stage 2 opencode/big-pickle, stage 3 OpenRouter/Qwen-4#high max'
+  if ("$(StageModel $l 2) / $(StageModel $l 3)" -ne 'opencode/big-pickle high / OpenRouter/Qwen-4#high max') { throw "StageModel: OpenCode $(StageModel $l 2) / $(StageModel $l 3)" }
   # A hard ticket, by its header or by two reopens, gets the `hard` implementer; nothing else does.
   if ("$(StageModel 'stage 2 gpt-6.1-sol high, hard sonnet-5.5 xhigh, stage 3 gpt-6.1-sol max' 'hard')" -ne 'sonnet-5.5 xhigh') { throw 'StageModel: hard' }
   $Model2, $Effort2, $ModelHard, $EffortHard = 'easy', 'high', 'strong', 'xhigh'
@@ -784,6 +829,15 @@ if ($SelfCheck) {
   if ((UsageCells (Usage $tmp 'gpt-6-luna'))[1] -ne '$0.160') { throw "Usage: Codex $((UsageCells (Usage $tmp 'gpt-6-luna'))[1])" }
   if ((UsageCells (Usage $tmp 'gpt-unpriced'))[1] -ne '?') { throw 'Usage: unpriced model must read ?' }
   if ((UsageCells (Usage $tmp 'gpt-6-luna-fast'))[1] -ne '$0.320') { throw 'Usage: fast must bill twice the base' }
+  # OpenCode prices its own steps; the last text event is the final message. Shape: the probe of 2026-10-27.
+  $step = { param($in, $out, $read, $cost) "{`"type`":`"step_finish`",`"sessionID`":`"s`",`"part`":{`"type`":`"step-finish`",`"cost`":$cost,`"tokens`":{`"input`":$in,`"output`":$out,`"reasoning`":10,`"cache`":{`"read`":$read,`"write`":0}}}}" }
+  [IO.File]::WriteAllText($tmp, (@((& $step 7669 74 1017 0.25), '{"type":"text","sessionID":"s","part":{"type":"text","text":"first"}}', (& $step 153 37 8688 0.5),
+                                   '{"type":"text","sessionID":"s","part":{"type":"text","text":"Which one?"}}') -join "`n"))
+  $u = Usage $tmp 'opencode/big-pickle'
+  if ("$($u.In) $($u.Cached) $($u.Out) $($u.Cost)" -ne '17527 9705 131 0.75') { throw "Usage: OpenCode $u" }
+  if ((OpenCodeFinal (Read-StageLog $tmp)) -ne 'Which one?') { throw 'OpenCodeFinal: not the last text' }
+  [IO.File]::WriteAllText($tmp, '{"type":"error","error":{"type":"provider.no-route","message":"x"}}')
+  if ($null -ne (Usage $tmp 'opencode/big-pickle')) { throw 'Usage: OpenCode without steps must read ?' }
   Remove-Item $tmp
   # Killed stage (no turn.completed) priced from its rollout; subagent rollouts at any depth add to it.
   $codexHome = Join-Path $env:TEMP ('sweatshop-codexhome-' + [guid]::NewGuid().ToString('N'))
