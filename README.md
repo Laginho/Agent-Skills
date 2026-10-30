@@ -1,6 +1,6 @@
 # Agent Skills
 
-Six skills for coding agents. Provider-agnostic: a skill is a folder with a
+Eight skills for coding agents. Provider-agnostic: a skill is a folder with a
 `SKILL.md` inside, which is all any tool needs.
 
 | Skill | What it does |
@@ -10,10 +10,11 @@ Six skills for coding agents. Provider-agnostic: a skill is a folder with a
 | [`ticket-flow`](ticket-flow/SKILL.md) | The one-ticket-at-a-time build loop: stage 1 specifies, stage 2 implements test-first on a branch named for the id, stage 3 reviews and merges. Dispatches a bare ticket id on its `Stage:` line. Needs a repo with a local tracker (`docs/agents/issue-tracker.md`) and a bindings block in `AGENTS.md`. |
 | [`foreman`](foreman/SKILL.md) | Supervises one `sweatshop` run: standup, a background driver, 30-minute check-ins, crash handling, and a closing summary for the human. |
 | [`scout`](scout/SKILL.md) | Says which `sweatshop` lanes can start now beside the running ones: work ready, no driver on the clone, no overlap in `Primary files`. Read-only, launches nothing. |
+| [`taskmaster`](taskmaster/SKILL.md) | Runs several `sweatshop` lanes through their foremen, one per one or two lanes: relays syncs when a lane's PR merges and ends with one digest across lanes. |
 | [`sweatshop`](sweatshop/SKILL.md) | The unattended driver for `ticket-flow`: launches fresh Claude Code, Codex or OpenCode CLI sessions, one stage at a time, each on the runtime its lineup model belongs to, collect merged tickets on one `sweatshop/*` branch, and open a single PR. |
 | [`grill-proxy`](grill-proxy/SKILL.md) | Grilling where the proxy (`sweatshop/scripts/proxy.ps1`) answers the routine questions of each round and only design, taste and irreversible calls reach the human. Wraps the vendored `grilling` skill; `ticket-flow` stage 1 uses it. |
 
-All are user-invoked (`/audit`, `/standup`, `/ticket-flow` or a bare ticket id, `/sweatshop`, `/foreman`, `/scout`, `/grill-proxy`), never fired automatically — except `grill-proxy`, which `ticket-flow` stage 1 also calls.
+All are user-invoked (`/audit`, `/standup`, `/ticket-flow` or a bare ticket id, `/sweatshop`, `/foreman`, `/scout`, `/taskmaster`, `/grill-proxy`), never fired automatically — except `grill-proxy`, which `ticket-flow` stage 1 also calls.
 
 ## Install
 
@@ -57,8 +58,8 @@ The folder name is what the user types as `/<name>`, so keep `audit` and
 Not listed? Use whatever directory your tool documents for skills. If it has
 none, the two `SKILL.md` files still work as plain Markdown you read on demand.
 
-Copy with `cp -r audit standup ticket-flow sweatshop foreman scout grill-proxy <dir>/` or, on Windows
-PowerShell, `Copy-Item audit,standup,ticket-flow,sweatshop,foreman,scout,grill-proxy <dir> -Recurse`.
+Copy with `cp -r audit standup ticket-flow sweatshop foreman scout taskmaster grill-proxy <dir>/` or, on Windows
+PowerShell, `Copy-Item audit,standup,ticket-flow,sweatshop,foreman,scout,taskmaster,grill-proxy <dir> -Recurse`.
 
 Check `grill-proxy/SKILL.md` is discoverable under `~/.agents/skills/` for Codex
 too. When the proxy script fails, the wrapper falls back to plain `grilling`, with
