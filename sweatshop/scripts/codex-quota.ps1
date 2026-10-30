@@ -44,8 +44,9 @@ if ($SelfCheck) {
 }
 
 $home_ = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOME '.codex' }
+# .NET on Linux reports CreationTime as the last write, so there the start comes from the content or the name.
 $all = Get-ChildItem (Join-Path $home_ 'sessions') -Recurse -Filter 'rollout-*.jsonl' |
-  Where-Object { $_.LastWriteTime -ge $Since.AddDays(-2) -and $_.CreationTime -le $Until } |
+  Where-Object { $_.LastWriteTime -ge $Since.AddDays(-2) -and ($IsLinux -or $_.CreationTime -le $Until) } |
   ForEach-Object { Read-Rollout $_ } | Where-Object { $_ }
 $baseline = $all | Where-Object { $_.End -lt $Since } | Sort-Object End | Select-Object -Last 1
 $run = @($all | Where-Object { $_.End -ge $Since -and $_.Start -le $Until })
@@ -57,7 +58,7 @@ $stages = Get-ChildItem (Join-Path $Tracker 'run-log') -Filter '*.txt' |
   ForEach-Object {
     $first = Get-Content -LiteralPath $_.FullName -TotalCount 1
     [pscustomobject]@{ Stage = $_.BaseName; Thread = [regex]::Match("$first", '"thread_id":"([^"]+)"').Groups[1].Value
-      From = $_.CreationTime; To = $_.LastWriteTime }
+      From = $(if ($IsLinux) { [datetime]::ParseExact(($_.BaseName -split '-')[-2..-1] -join '-', 'yyyyMMdd-HHmmss', $null) } else { $_.CreationTime }); To = $_.LastWriteTime }
   }
 foreach ($r in $run) {
   $s = $stages | Where-Object { $_.Thread -eq $r.Thread } | Select-Object -First 1

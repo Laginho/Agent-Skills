@@ -48,6 +48,11 @@ Claude Code, launch it as a **detached process** with its output in a file:
 
     Start-Process powershell -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','<script>','<repo>',<flags> -RedirectStandardOutput <tracker>/run-log/driver-<when>.out -RedirectStandardError <tracker>/run-log/driver-<when>.out.err -WindowStyle Hidden -PassThru
 
+On Linux, from Bash (there `Start-Process` pipes the output through the launching
+shell, so it stops when that shell exits); its pid is `pgrep -f '<script> <repo>'`:
+
+    setsid pwsh -NoProfile -File <script> <repo> <flags> > <tracker>/run-log/driver-<when>.out 2> <tracker>/run-log/driver-<when>.out.err < /dev/null &
+
 Not a background Bash/PowerShell task: those die at their `timeout`, 2 h at
 most. The detached driver does not show in the session's task pane;
 tell the human its pid and `.out` path. In Codex, a terminal session. A lineup the human asks for goes on the command line

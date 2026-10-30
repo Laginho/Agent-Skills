@@ -79,7 +79,7 @@ the model its `model:` line names (any runtime's id; Claude ids pinned). Every
 caller, attended or not, reaches it through `scripts/proxy.ps1`, which runs that
 model's CLI read-only, prints the answer and the `Proxy decided (<model>)` or
 `Proxy escalated (<model>)` line to record, and writes a receipt under
-`%TEMP%\sweatshop-proxy\`. Changing the proxy's model is editing those two lines.
+`sweatshop-proxy` in the temp folder (`%TEMP%`, `/tmp` on Linux). Changing the proxy's model is editing those two lines.
 
 - **Pings, before the first stage.** `proxy.ps1 -Ping` must answer
   `Decision: pong`, or the run stops. Then, for each runtime in the lineup, a
@@ -124,7 +124,11 @@ model's CLI read-only, prints the answer and the `Proxy decided (<model>)` or
   leaves its row for reconciliation by the foreman.
 - Each CLI launches suspended into its own Windows Job Object before running.
   Normal exit, a ten-second grace after a terminal runtime event, or the stage
-  timeout closes that job and its descendants. Existing shared services are not
+  timeout closes that job and its descendants. On Linux (`pwsh` 7) the job is a
+  transient systemd user scope: its cgroup keeps descendants that start a new
+  session (Codex does, per tool command), they get SIGTERM, then `cgroup.kill`
+  after 3 s, and a watchdog in the scope kills it if the driver dies. A Linux
+  driver therefore needs a systemd user session (`systemd-run --user`). Existing shared services are not
   owned by it. Broker-launched processes outside the job need explicit ownership
   and cleanup in their QA kit. Committed ticket state decides success; a final
   message or terminal event alone does not. Log reads retry sharing violations
@@ -162,7 +166,7 @@ review is charged to whoever last sent the ticket to review. It reads files only
 findings table separates ticket/session/release-audit/post-release discoveries,
 review misses and review-induced churn; `interventions.md` separates rescues from
 routine approvals, proxy decisions and automatic recovery. Unknown history stays
-unknown. Run `powershell -NoProfile -File scripts/runtime-tests.ps1` for the local
+unknown. Run `powershell -NoProfile -File scripts/runtime-tests.ps1` (`pwsh` on Linux) for the local
 process, log-lock and recovery regression tests (no agent or network).
 
 It prints the open tickets as a tree before and after every run, including runs
@@ -221,7 +225,7 @@ timeout kill stops the agent, and `--auto` approves every permission the OpenCod
 config does not deny (a denied one stays denied). OpenCode reads no global
 `CLAUDE.md`, so its prompt names the skill (`Use the ticket-flow skill on <id>.`):
 `ticket-flow` and the skills it calls must be installed under
-`~/.config/opencode/skills/` as junctions to this repo, never copies (a copy
+`~/.config/opencode/skills/` as junctions (symlinks on Linux) to this repo, never copies (a copy
 measured 2026-10-27 was five weeks stale). The cost column is OpenCode's own price
 per step; subagent sessions are not counted. An unknown model or variant stops the
 run instead of retrying.
