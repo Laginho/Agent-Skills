@@ -7,13 +7,14 @@ using System.Text;
 
 // A suspended launch closes the race between creating children and assigning ownership.
 // The non-inheritable job handle also cleans up descendants if the driver itself dies.
-// Elsewhere the stage leads its own session (setsid), so one group signal reaches every
-// descendant that stays in it; a watchdog in the group kills it if the driver dies.
+// Elsewhere a transient systemd user scope is the job: a cgroup that setsid or a double fork
+// cannot leave (Codex runs each tool command in a new session). A watchdog inside kills it if
+// the driver dies.
 public sealed class SweatshopStageProcess : IDisposable
 {
     static readonly bool Windows = Environment.OSVersion.Platform == PlatformID.Win32NT;
     IntPtr job, process;
-    Process unix;
+    Process unix; string cgroup;
     public int Id { get; private set; }
     [StructLayout(LayoutKind.Sequential)] struct Security { public int Length; public IntPtr Descriptor; public int Inherit; }
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)] struct Startup {
@@ -45,8 +46,10 @@ public sealed class SweatshopStageProcess : IDisposable
     [DllImport("kernel32.dll", SetLastError = true)] static extern uint WaitForSingleObject(IntPtr handle, uint ms);
     [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
     [DllImport("libc", SetLastError = true)] static extern int kill(int pid, int sig);
-    // $1 log, $2 driver pid, then the CLI and its arguments. exec keeps the session leader's pid.
-    const string Launcher = "log=$1 driver=$2; shift 2; (while kill -0 $driver 2>/dev/null; do sleep 1; done; kill -KILL 0) </dev/null >/dev/null 2>&1 & exec \"$@\" </dev/null >>\"$log\" 2>>\"$log.err\"";
+    // $1 log, $2 driver pid, then the CLI and its arguments. exec keeps the pid systemd-run had.
+    const string Launcher = "log=$1 driver=$2; shift 2; cg=/sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup); echo \"$cg\" >\"$log.cgroup\"; " +
+        "(while kill -0 $driver 2>/dev/null; do sleep 1; done; echo 1 >\"$cg/cgroup.kill\") </dev/null >/dev/null 2>&1 & " +
+        "exec \"$@\" </dev/null >>\"$log\" 2>>\"$log.err\"";
     static void Check(bool ok) { if (!ok) throw new Win32Exception(Marshal.GetLastWin32Error()); }
     static IntPtr Open(string path, uint access, uint disposition, ref Security security) {
         var handle = CreateFile(path, access, 7, ref security, disposition, 0x80, IntPtr.Zero);
@@ -59,10 +62,25 @@ public sealed class SweatshopStageProcess : IDisposable
             // FileShare is enforced here too: a log a reader holds exclusively fails, as CreateFile does.
             foreach (var path in new[] { log, log + ".err" }) new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete).Dispose();
             // Arguments, not ArgumentList: .NET splits this string by the same rules as a Windows command line.
-            var start = new ProcessStartInfo("setsid", "sh -c \"" + Launcher.Replace("\"", "\\\"") + "\" sweatshop-stage \"" + log + "\" " +
-                Process.GetCurrentProcess().Id + " \"" + exe + "\" " + args);
+            // setsid keeps the driver's terminal signals off the stage, as CREATE_NO_WINDOW does.
+            var unit = "sweatshop-stage-" + Guid.NewGuid().ToString("N") + ".scope";
+            var start = new ProcessStartInfo("setsid", "systemd-run --user --scope --quiet --collect --unit=" + unit +
+                " sh -c \"" + Launcher.Replace("\"", "\\\"") + "\" sweatshop-stage \"" + log + "\" " + Process.GetCurrentProcess().Id + " \"" + exe + "\" " + args);
             start.UseShellExecute = false; start.WorkingDirectory = cwd;
             owner.unix = Process.Start(start); owner.Id = owner.unix.Id;
+            // The launcher names its cgroup before exec; a stage may exit before /proc shows it.
+            var wait = Stopwatch.StartNew();
+            while (owner.cgroup == null) {
+                bool exited = owner.unix.HasExited;
+                string line = null;
+                try { line = File.ReadAllText(log + ".cgroup").Trim(); } catch (IOException) { }
+                if (line != null && line.EndsWith("/" + unit)) owner.cgroup = line;
+                else if (exited || wait.ElapsedMilliseconds > 10000) {
+                    if (!owner.unix.HasExited) owner.unix.Kill();
+                    owner.Dispose();
+                    throw new InvalidOperationException("systemd-run did not start stage scope " + unit + "; a systemd user session is required.");
+                } else System.Threading.Thread.Sleep(10);
+            }
             return owner;
         }
         var info = new ProcessInfo();
@@ -104,10 +122,12 @@ public sealed class SweatshopStageProcess : IDisposable
     public int ExitCode { get { if (!Windows) return unix.ExitCode; uint code; Check(GetExitCodeProcess(process, out code)); return unchecked((int)code); } }
     public void Stop() {
         if (!Windows) {
-            // SIGTERM lets a CLI flush its session; SIGKILL after 3 s, like TerminateJobObject.
-            Signal(15); if (GroupGone(3000)) return;
-            Signal(9); if (GroupGone(5000)) return;
-            throw new InvalidOperationException("Stage process group still has processes after SIGKILL.");
+            // SIGTERM lets a CLI flush its session; cgroup.kill after 3 s is TerminateJobObject.
+            foreach (var pid in Members()) kill(pid, 15);
+            if (Emptied(3000)) return;
+            try { using (var f = new FileStream(cgroup + "/cgroup.kill", FileMode.Open, FileAccess.Write)) f.WriteByte((byte)'1'); } catch (IOException) { } // gone: empty
+            if (Emptied(5000)) return;
+            throw new InvalidOperationException("Stage cgroup still has processes after cgroup.kill: " + cgroup);
         }
         Check(TerminateJobObject(job, 1));
         var wait = System.Diagnostics.Stopwatch.StartNew();
@@ -119,11 +139,18 @@ public sealed class SweatshopStageProcess : IDisposable
         } while (wait.ElapsedMilliseconds < 5000);
         throw new InvalidOperationException("Stage job still has active processes after 5 seconds.");
     }
-    void Signal(int sig) { if (kill(-Id, sig) != 0 && Marshal.GetLastWin32Error() != 3) throw new Win32Exception(Marshal.GetLastWin32Error()); } // 3: ESRCH, group empty
-    bool GroupGone(int ms) {
+    // --collect removes the scope once it is empty, so a missing cgroup has no members.
+    int[] Members() {
+        string[] lines;
+        try { lines = File.ReadAllLines(cgroup + "/cgroup.procs"); } catch (IOException) { return new int[0]; }
+        var pids = new int[lines.Length];
+        for (int i = 0; i < lines.Length; i++) pids[i] = int.Parse(lines[i]);
+        return pids;
+    }
+    bool Emptied(int ms) {
         var wait = Stopwatch.StartNew();
         do {
-            if (kill(-Id, 0) != 0 && Marshal.GetLastWin32Error() == 3) return true;
+            if (Members().Length == 0) return true;
             System.Threading.Thread.Sleep(20);
         } while (wait.ElapsedMilliseconds < ms);
         return false;

@@ -47,6 +47,12 @@ try {
   Assert (Test-Path $pidFile) 'Timed-out stage never started its child'
   Start-Sleep -Milliseconds 200
   Assert (-not (Get-Process -Id ([int](Get-Content $pidFile)) -ErrorAction SilentlyContinue)) 'Orphan after timeout'
+  if (-not $OnWindows) {
+    # Codex runs each tool command in a new session; the stage's cgroup still owns it.
+    $run = Invoke-StageProcess '/bin/sh' "-c `"setsid sleep 60 & echo `$! > '$pidFile'; sleep 60`"" $testRoot (Join-Path $testRoot 'session.txt') 'Codex' 2 0.5
+    Start-Sleep -Milliseconds 200
+    Assert ($run.Result -eq 'timeout' -and -not (Get-Process -Id ([int](Get-Content $pidFile)) -ErrorAction SilentlyContinue)) 'A new session escaped the stage'
+  }
 
   if ($OnWindows) {
     $batch = Join-Path $testRoot 'CLI with spaces.cmd'
