@@ -130,7 +130,7 @@ $GateCmd = ($Gate -split ' ')[0]
 # was denied while `Bash(npx:*)` ran. The same prefixes again for the PowerShell tool:
 # measured 2026-10-02, sonnet-5.5 on Windows ran the gate through it, every call was
 # denied, and SYN-019 burned an attempt asking for approval in 2 minutes.
-$Allowed = (@('git', 'gh', $GateCmd, 'npx', 'node', 'powershell', 'flutter', 'dart') | ForEach-Object { "Bash(${_}:*)"; "PowerShell(${_}:*)" }) + ('Read', 'Edit', 'Write', 'Glob', 'Grep', 'Agent') | ForEach-Object { "`"$_`"" }
+$Allowed = (@('git', 'gh', $GateCmd, 'npx', 'node', 'powershell', $PowerShellExe, 'flutter', 'dart') | Select-Object -Unique | ForEach-Object { "Bash(${_}:*)"; "PowerShell(${_}:*)" }) + ('Read', 'Edit', 'Write', 'Glob', 'Grep', 'Agent') | ForEach-Object { "`"$_`"" }
 $Allowed = $Allowed -join ' '
 
 # --- local-only files (never dirty the tree) -----------------------------------
@@ -607,8 +607,8 @@ function Note($t, $line, $stage, $details) {
   if ($stage) { $text = $text -replace '(?m)^(\*{0,2}Stage\*{0,2}:\*{0,2})\s*.+$', "`$1 $stage" }
   [IO.File]::WriteAllText((Join-Path $Repo $t.File), $text, [Text.UTF8Encoding]::new($false))
   # -F, not -m: a log tail with quotes or `--flags` inside splits into git options under PS 5.1.
-  # $PID: runs on other repos share %TEMP%; one fixed name commits their message here.
-  $msg = Join-Path $env:TEMP "sweatshop-commit-$PID.txt"
+  # $PID: runs on other repos share the temp folder; one fixed name commits their message here.
+  $msg = Join-Path ([IO.Path]::GetTempPath()) "sweatshop-commit-$PID.txt"
   $subject, $body = $line -split ' Log tail: ', 2
   [IO.File]::WriteAllText($msg, "chore: $subject ($($t.Id))$(if ($body) { "`n`nLog tail: $body" })", [Text.UTF8Encoding]::new($false))
   GitOk add $t.File; GitOk commit -q -F $msg | Out-Null
@@ -630,7 +630,7 @@ function Ping-Proxy {
     $rt = RuntimeOf $model; if ($script:ProxyVia.Contains($rt)) { continue }
     $log = Join-Path $RunDir ('ping-{0}-{1}.txt' -f $rt, (Get-Date -Format yyyyMMdd-HHmmss))
     $since = Get-Date
-    $cmd = "powershell -NoProfile -ExecutionPolicy Bypass -File $ProxyScript -Repo $Repo -Ping"
+    $cmd = "$PowerShellExe -NoProfile -ExecutionPolicy Bypass -File $ProxyScript -Repo $Repo -Ping"
     $prompt = "Connectivity check from the sweatshop driver, not a ticket: read nothing and change nothing. Run exactly this one command and reply with its output: $cmd"
     # shortcut: the command rides unquoted in the prompt; a path with spaces needs quoting here.
     $run = Invoke-StageProcess $Cli[$rt] (StageArgs $rt $model 'low' $prompt 'proxy ping' "$log.final") $Repo $log $rt 600
@@ -772,7 +772,7 @@ function Publish-Session {
   if ($Loop -eq $Base -or -not [int](git rev-list --count "$Base..$Loop")) { Say "session ${Loop}: nothing merged, no PR"; return }
   GitOk push -q
   $done = @(CompletedTickets)
-  $body = Join-Path $env:TEMP "sweatshop-pr-$PID.md"
+  $body = Join-Path ([IO.Path]::GetTempPath()) "sweatshop-pr-$PID.md"
   [IO.File]::WriteAllText($body, (SessionBody), [Text.UTF8Encoding]::new($false))
   # gh is a native command: a failure is only an exit code, so check it or the run
   # ends saying "session PR:" with nothing after the colon.
@@ -840,9 +840,9 @@ if ($SelfCheck) {
     $verb = if ($existing) { 'edit' } else { 'create' }
     if ($seen.args[1] -ne $verb -or $seen.args[[array]::IndexOf($seen.args, '--title') + 1] -ne 'Agent-Skills: sweatshop 2026-10-29') { throw "Publish-Session title on ${verb}: $($seen.args)" }
   }
-  Remove-Item (Join-Path $env:TEMP "sweatshop-pr-$PID.md") -ErrorAction SilentlyContinue
+  Remove-Item (Join-Path ([IO.Path]::GetTempPath()) "sweatshop-pr-$PID.md") -ErrorAction SilentlyContinue
   # Verdict decides whether an attempt is spent; the shapes are the two real logs of 2026-09-14.
-  $tmp = Join-Path $env:TEMP "sweatshop-verdict-$PID.txt"
+  $tmp = Join-Path ([IO.Path]::GetTempPath()) "sweatshop-verdict-$PID.txt"
   foreach ($case in @(@("API Error: Unable to connect to API (ENOTFOUND)`n", 'api-error'),
                       @("Three options.`n`nWhich one do you want?`n", 'asked'),
                       @("Done for stage 2, gate green.`n", 'failed'))) {
@@ -918,10 +918,10 @@ if ($SelfCheck) {
   if ($null -ne (Usage $tmp 'opencode/big-pickle')) { throw 'Usage: OpenCode without steps must read ?' }
   Remove-Item $tmp
   # Killed stage (no turn.completed) priced from its rollout; subagent rollouts at any depth add to it.
-  $codexHome = Join-Path $env:TEMP ('sweatshop-codexhome-' + [guid]::NewGuid().ToString('N'))
+  $codexHome = Join-Path ([IO.Path]::GetTempPath()) ('sweatshop-codexhome-' + [guid]::NewGuid().ToString('N'))
   $savedHome = $env:CODEX_HOME; $env:CODEX_HOME = $codexHome
   try {
-    $day = Join-Path $codexHome 'sessions\2026\10\20'; New-Item -ItemType Directory -Force $day | Out-Null
+    $day = Join-Path $codexHome 'sessions/2026/10/20'; New-Item -ItemType Directory -Force $day | Out-Null
     $tok = { param($in, $out) @{ type = 'event_msg'; payload = @{ type = 'token_count'; info = @{ total_token_usage = @{ input_tokens = $in; cached_input_tokens = 0; cache_write_input_tokens = 0; output_tokens = $out } } } } | ConvertTo-Json -Compress -Depth 9 }
     $rollout = { param($id, $parent, [string[]]$events)
       $src = if ($parent) { @{ subagent = @{ thread_spawn = @{ parent_thread_id = $parent } } } } else { 'cli' }
@@ -953,7 +953,7 @@ if ($SelfCheck) {
                    [pscustomobject]@{ Id = 'A-3'; Review = 'agent'; Verdict = 'Needs your call: x' })
   if ((($body -split "`n") -like '- *') -join ' ' -notmatch 'A-2 .* A-3 .* A-1') { throw "PrBody: order`n$body" }
   # GitOk must return stdout only: `checkout -b` says "Switched to a new branch" on stderr.
-  $tmp = Join-Path $env:TEMP ('sweatshop-git-' + [guid]::NewGuid())
+  $tmp = Join-Path ([IO.Path]::GetTempPath()) ('sweatshop-git-' + [guid]::NewGuid())
   New-Item -ItemType Directory -Force $tmp | Out-Null
   GitOk -C $tmp init -q | Out-Null
   $leak = @(GitOk -C $tmp checkout -b probe)
@@ -961,7 +961,7 @@ if ($SelfCheck) {
   if ($leak.Count) { throw "GitOk: stderr leaked into output: $($leak -join ' / ')" }
   # Lock is all that keeps two drivers off one repo: a second process must not get it.
   $l = Lock "sweatshop-selfcheck-$PID" 0
-  $other = powershell -NoProfile -Command "[Threading.Mutex]::new(`$false, 'sweatshop-selfcheck-$PID').WaitOne(0)"
+  $other = & $PowerShellExe -NoProfile -Command "[Threading.Mutex]::new(`$false, 'sweatshop-selfcheck-$PID').WaitOne(0)"
   $l.ReleaseMutex(); $l.Dispose()
   if ("$other" -ne 'False') { throw "Lock: a second process got it ($other)" }
   Write-Host 'Self-check OK'; exit 0

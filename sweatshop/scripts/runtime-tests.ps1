@@ -1,9 +1,10 @@
 # Local regression tests: no agent, network, user repository, or live app is started.
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'stage-runtime.ps1')
-$testRoot = Join-Path $env:TEMP ('sweatshop-runtime-' + [guid]::NewGuid().ToString('N'))
+$testRoot = Join-Path ([IO.Path]::GetTempPath()) ('sweatshop-runtime-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory $testRoot | Out-Null
-$shellExe = (Get-Command powershell.exe).Source
+$shellExe = (Get-Command $PowerShellExe -CommandType Application | Select-Object -First 1).Source
+$hidden = if ($OnWindows) { @{ WindowStyle = 'Hidden' } } else { @{} }   # no windows to hide elsewhere
 function Assert($condition, $message) { if (-not $condition) { throw $message } }
 function Encoded($script) { '-NoProfile -EncodedCommand ' + [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($script)) }
 function Load-Functions($path) {
@@ -18,7 +19,7 @@ try {
   Assert (-not (Test-StageCompleted '{"type":"item.completed","text":"turn.completed"}' 'Codex')) 'Quoted completion is not a runtime event'
   Assert (Test-StageCompleted '{"type":"result","result":"done"}' 'Claude') 'Claude result not recognized'
   Assert (-not (Test-StageCompleted '{"type":"turn.completed"' 'Codex')) 'Partial JSON accepted'
-  $unrelated = Start-Process $shellExe -ArgumentList (Encoded 'Start-Sleep -Seconds 60') -WindowStyle Hidden -PassThru
+  $unrelated = Start-Process $shellExe -ArgumentList (Encoded 'Start-Sleep -Seconds 60') @hidden -PassThru
   $childScript = Encoded 'Start-Sleep -Seconds 60'
   $pidFile = Join-Path $testRoot 'child.pid'
   $script = "`$child = Start-Process '$shellExe' -ArgumentList '$childScript' -NoNewWindow -PassThru; [IO.File]::WriteAllText('$pidFile', [string]`$child.Id); Write-Output '{`"type`":`"turn.completed`",`"usage`":{`"input_tokens`":1}}'; Start-Sleep -Seconds 60"
@@ -38,11 +39,22 @@ try {
   Start-Sleep -Milliseconds 200
   Assert (-not (Get-Process -Id ([int](Get-Content $pidFile)) -ErrorAction SilentlyContinue)) 'Orphan after natural exit'
 
-  $run = Invoke-StageProcess $shellExe (Encoded 'Start-Sleep -Seconds 60') $testRoot (Join-Path $testRoot 'timeout.txt') 'Codex' 1 0.5
+  # A timeout stops the stage's descendants too, not only the CLI.
+  Remove-Item $pidFile
+  $script = $script -replace "; Write-Output '[^']+'$", '; Start-Sleep -Seconds 60'
+  $run = Invoke-StageProcess $shellExe (Encoded $script) $testRoot (Join-Path $testRoot 'timeout.txt') 'Codex' 8 0.5
   Assert ($run.Result -eq 'timeout' -and $null -eq $run.CompletedUtc) 'Genuine timeout misclassified'
+  Assert (Test-Path $pidFile) 'Timed-out stage never started its child'
+  Start-Sleep -Milliseconds 200
+  Assert (-not (Get-Process -Id ([int](Get-Content $pidFile)) -ErrorAction SilentlyContinue)) 'Orphan after timeout'
 
-  $batch = Join-Path $testRoot 'CLI with spaces.cmd'
-  [IO.File]::WriteAllText($batch, "@echo off`r`necho {`"type`":`"turn.completed`"}`r`n")
+  if ($OnWindows) {
+    $batch = Join-Path $testRoot 'CLI with spaces.cmd'
+    [IO.File]::WriteAllText($batch, "@echo off`r`necho {`"type`":`"turn.completed`"}`r`n")
+  } else {
+    $batch = Join-Path $testRoot 'CLI with spaces'
+    [IO.File]::WriteAllText($batch, "#!/bin/sh`necho '{`"type`":`"turn.completed`"}'`n"); chmod +x $batch
+  }
   $run = Invoke-StageProcess $batch '' $testRoot (Join-Path $testRoot 'batch.txt') 'Codex' 15
   Assert ($run.Result -eq 'exit 0' -and $run.CompletedUtc -and -not $run.InfrastructureError) 'Batch CLI path quoting failed'
   # OpenCode (an npm .cmd) has no terminal event: its exit ends the stage.

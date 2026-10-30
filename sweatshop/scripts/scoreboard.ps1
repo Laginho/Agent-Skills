@@ -151,7 +151,7 @@ function Interventions($file) {
 
 if ($SelfCheck) {
   # Attribution is the whole point: a reopen charged to the wrong implementer ranks the wrong model.
-  $tmp = Join-Path $env:TEMP "scoreboard-$PID.md"
+  $tmp = Join-Path ([IO.Path]::GetTempPath()) "scoreboard-$PID.md"
   $s = 'sweatshop/x'
   Set-Content -Encoding UTF8 $tmp @(
     '| When | ID | Stage | Model | Attempt | Outcome | Session | Took | Tokens | Cost |', '|---|---|---|---|---|---|---|---|---|---|',
@@ -172,7 +172,7 @@ if ($SelfCheck) {
     "| 2026-09-27 11:19 | T-4 | review | r high | 1 | merged | $s | 5m | ? | ? |",
     '| 2026-09-27 11:20 | T-3 | review | r high | 1 | reopened | x | 5m |')   # old shape, no Tokens/Cost; sent to review before the log
   # Round 1 of T-4 is noise and round 2 is S2: a join that ignored the round would count one S2, not two.
-  $att = Join-Path $env:TEMP "attribution-$PID.md"
+  $att = Join-Path ([IO.Path]::GetTempPath()) "attribution-$PID.md"
   Set-Content -Encoding UTF8 $att @(
     '| When | ID | Round | Implementer | Reviewer | Label | Finding | Why |', '|---|---|---|---|---|---|---|---|',
     '| 2026-09-27 | T-1 | 1 | a high | r high | S2-implicito | x | x |',
@@ -203,7 +203,7 @@ if ($SelfCheck) {
   Set-Content -Encoding UTF8 $tmp '| 2026-10-03 12:00 | T-1 | implement | a high | 1 | to-review | sweatshop/x | 3m | ? | ? | 1.250 |'
   $timed = @(Rows $tmp 'repo')
   if ($timed.Count -ne 1 -or $timed[0].Shutdown -ne 1.25) { throw 'Shutdown timing schema' }
-  $events = Join-Path $env:TEMP "interventions-$PID.md"
+  $events = Join-Path ([IO.Path]::GetTempPath()) "interventions-$PID.md"
   Set-Content -Encoding UTF8 $events @(
     '| When | Ticket | Kind | Evidence |',
     '| 2026-10-03 12:00 | T-1 | human-rescue | notes#1 |',

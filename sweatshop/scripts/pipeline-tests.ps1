@@ -1,6 +1,6 @@
 ﻿# Offline production regressions. Every repository and CLI here is disposable.
 $ErrorActionPreference = 'Stop'
-$root = Join-Path $env:TEMP ('sweatshop-pipeline-' + [guid]::NewGuid().ToString('N'))
+$root = Join-Path ([IO.Path]::GetTempPath()) ('sweatshop-pipeline-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory $root | Out-Null
 $failures = @(); $checks = 0
 function Check($name, [scriptblock]$body) {
@@ -35,11 +35,12 @@ $i = [array]::IndexOf($args, '--output-last-message')
 if ($env:FAKE_PROXY_ANSWER -and $i -ge 0) { [IO.File]::WriteAllText($args[$i + 1], $env:FAKE_PROXY_ANSWER) }
 Write-Output '{"type":"turn.completed","usage":{"input_tokens":1}}'
 '@)
-[IO.File]::WriteAllText("$fakeBin/codex.cmd", "@echo off`r`npowershell -NoProfile -ExecutionPolicy Bypass -File `"$fakeBin/fake-codex.ps1`" %*`r`n")
+if ($OnWindows) { [IO.File]::WriteAllText("$fakeBin/codex.cmd", "@echo off`r`npowershell -NoProfile -ExecutionPolicy Bypass -File `"$fakeBin/fake-codex.ps1`" %*`r`n") }
+else { [IO.File]::WriteAllText("$fakeBin/codex", "#!/bin/sh`nexec pwsh -NoProfile -File `"$fakeBin/fake-codex.ps1`" `"`$@`"`n"); chmod +x "$fakeBin/codex" }
 $fakeCard = Join-Path $root 'proxy.md'
 [IO.File]::WriteAllText($fakeCard, "---`nname: proxy`nmodel: gpt-fake`neffort: high`n---`n`nYou stand in for the owner.`n")
 $ProxyCard = $fakeCard
-$env:PATH = "$fakeBin;$env:PATH"
+$env:PATH = "$fakeBin$([IO.Path]::PathSeparator)$env:PATH"
 function Fixture($name) {
   $script:Repo = Join-Path $root $name
   New-Item -ItemType Directory "$Repo/.scratch/feature/issues" -Force | Out-Null
@@ -236,20 +237,21 @@ Check 'gate runner records actual exit and invalidates reused evidence on failur
     WriteTicket T-1 to-implement; StartSession
     $log = Join-Path $root 'gate with spaces.log'; $receipt = Join-Path $root 'gate with spaces.json'
     $runner = Join-Path $PSScriptRoot 'gate-evidence.ps1'
-    & powershell -NoProfile -ExecutionPolicy Bypass -File $runner -Repo $Repo -Command 'Write-Output green' -Log $log -Receipt $receipt *> (Join-Path $root 'gate-success-transcript.log')
+    & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File $runner -Repo $Repo -Command 'Write-Output green' -Log $log -Receipt $receipt *> (Join-Path $root 'gate-success-transcript.log')
     Assert ($LASTEXITCODE -eq 0 -and (Test-Path $receipt)) 'Successful wrapper did not record green evidence'
     Assert ((Get-Content $log -Raw) -match 'green[\s\S]*ExitCode: 0') 'Gate output or actual status missing'
     # A gate grandchild that outlives the gate (a preview server) must not hold the helper or its caller open.
-    $leak = Measure-Command { & powershell -NoProfile -ExecutionPolicy Bypass -File $runner -Repo $Repo -Command 'cmd /c start /b powershell -NoProfile -c Start-Sleep 30; Write-Output green' -Log $log -Receipt $receipt *> (Join-Path $root 'gate-leak-transcript.log') }
+    $leakCommand = if ($OnWindows) { 'cmd /c start /b powershell -NoProfile -c Start-Sleep 30; Write-Output green' } else { "sh -c 'sleep 30 &'; Write-Output green" }
+    $leak = Measure-Command { & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File $runner -Repo $Repo -Command $leakCommand -Log $log -Receipt $receipt *> (Join-Path $root 'gate-leak-transcript.log') }
     Assert ($LASTEXITCODE -eq 0 -and $leak.TotalSeconds -lt 20 -and (Test-Path $receipt)) "Gate helper waited $([int]$leak.TotalSeconds)s for a leaked grandchild"
     # PS 5.1 promotes native stderr under Stop; this child is expected to fail.
     $ErrorActionPreference = 'Continue'
-    & powershell -NoProfile -ExecutionPolicy Bypass -File $runner -Repo $Repo -Command 'exit 7' -Log $log -Receipt $receipt *> (Join-Path $root 'gate-failure-transcript.log')
+    & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File $runner -Repo $Repo -Command 'exit 7' -Log $log -Receipt $receipt *> (Join-Path $root 'gate-failure-transcript.log')
     $failedExit = $LASTEXITCODE; $ErrorActionPreference = 'Stop'
     Assert ($failedExit -ne 0 -and -not (Test-Path $receipt)) 'Failed rerun retained old green receipt'
     Assert ((Get-Content $log -Raw) -match 'ExitCode: 7') 'Wrapper dropped real failure exit code'
     $ErrorActionPreference = 'Continue'
-    & powershell -NoProfile -ExecutionPolicy Bypass -File $runner -Repo $Repo -Command 'git commit -q --allow-empty -m changed' -Log $log -Receipt $receipt *> (Join-Path $root 'gate-changing-transcript.log')
+    & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File $runner -Repo $Repo -Command 'git commit -q --allow-empty -m changed' -Log $log -Receipt $receipt *> (Join-Path $root 'gate-changing-transcript.log')
     $changedExit = $LASTEXITCODE; $ErrorActionPreference = 'Stop'
     Assert ($changedExit -ne 0 -and -not (Test-Path $receipt)) 'Gate attributed evidence after moving HEAD'
   } finally { Pop-Location }
@@ -360,16 +362,16 @@ Check 'proxy.ps1 from a session: answers, pings, and fails fast where the ping f
     Copy-Item $fakeCard "$card/proxy.md"
     $script = "$card/scripts/proxy.ps1"; $ErrorActionPreference = 'Continue'
     $env:FAKE_PROXY_ANSWER = 'Decision: pong'
-    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File $script -Repo $Repo -Ping 2>&1 | Out-String; $code = $LASTEXITCODE
+    $out = & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File $script -Repo $Repo -Ping 2>&1 | Out-String; $code = $LASTEXITCODE
     Assert ($code -eq 0 -and $out -match 'Decision: pong') "Ping: $code $out"
     $env:FAKE_PROXY_ANSWER = 'Decision: yes — fixture'
-    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File $script -Repo $Repo -Ticket T-1 -Question 'Is it?' 2>&1 | Out-String
+    $out = & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File $script -Repo $Repo -Ticket T-1 -Question 'Is it?' 2>&1 | Out-String
     Assert ($LASTEXITCODE -eq 0 -and $out -match '(?m)^- Proxy decided \(gpt-fake high\): yes — fixture \(receipt .+\.json\)') "Answer: $out"
     $env:SWEATSHOP_PROXY = 'driver'
-    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File $script -Repo $Repo -Ticket T-1 -Question 'Is it?' 2>&1 | Out-String
+    $out = & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File $script -Repo $Repo -Ticket T-1 -Question 'Is it?' 2>&1 | Out-String
     Assert ($LASTEXITCODE -eq 3 -and $out -match 'Stage: blocked') "Fail-fast: $LASTEXITCODE $out"
     $env:SWEATSHOP_PROXY = $null; $env:FAKE_PROXY_ANSWER = $null
-    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File $script -Repo $Repo -Ticket T-1 -Question 'Is it?' 2>&1 | Out-String
+    $out = & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File $script -Repo $Repo -Ticket T-1 -Question 'Is it?' 2>&1 | Out-String
     Assert ($LASTEXITCODE -eq 2 -and $out -match 'Proxy failed' -and $out -match 'Stage: blocked') "Failure: $LASTEXITCODE $out"
   } finally { $env:SWEATSHOP_PROXY = $null; $env:FAKE_PROXY_ANSWER = $null; $ErrorActionPreference = 'Stop'; Pop-Location }
 }

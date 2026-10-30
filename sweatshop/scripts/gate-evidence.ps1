@@ -49,14 +49,22 @@ if ($Command) {
     # Files, not a pipe: a gate grandchild that outlives the gate (a preview server) would hold a
     # pipe open and `*>` would wait for EOF forever (measured 2026-10-11, EDIT-001). Never -Wait: it waits for descendants.
     $out = [IO.Path]::GetFullPath("$Log.stdout"); $err = [IO.Path]::GetFullPath("$Log.stderr")
-    # The caller's pipe (Codex reads this helper) would leak to that grandchild too, and not only through
-    # the std handles (measured: clearing those three still hung). Every handle of this process stops being inheritable.
-    $kernel = Add-Type -Name GateHandles -Namespace Sweatshop -PassThru -MemberDefinition @'
+    if ([Environment]::OSVersion.Platform -eq 'Win32NT') {
+      # The caller's pipe (Codex reads this helper) would leak to that grandchild too, and not only through
+      # the std handles (measured: clearing those three still hung). Every handle of this process stops being inheritable.
+      $kernel = Add-Type -Name GateHandles -Namespace Sweatshop -PassThru -MemberDefinition @'
 [DllImport("kernel32.dll")] public static extern bool SetHandleInformation(IntPtr h, int mask, int flags);
 '@
-    # shortcut: handle values past 65536 stay inheritable; widen the range if a gate hangs again.
-    for ($h = 4; $h -lt 65536; $h += 4) { $null = $kernel::SetHandleInformation([IntPtr]$h, 1, 0) }
-    $child = Start-Process powershell -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$script`"" -NoNewWindow -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+      # shortcut: handle values past 65536 stay inheritable; widen the range if a gate hangs again.
+      for ($h = 4; $h -lt 65536; $h += 4) { $null = $kernel::SetHandleInformation([IntPtr]$h, 1, 0) }
+      $child = Start-Process powershell -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$script`"" -NoNewWindow -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+    } else {
+      # .NET opens everything close-on-exec, so only stdio leaks. Start-Process would pipe it and wait for
+      # the grandchild's EOF; the shell points all three at files instead.
+      $start = [Diagnostics.ProcessStartInfo]::new('sh'); $start.UseShellExecute = $false
+      foreach ($a in '-c', 'exec pwsh -NoProfile -File "$0" </dev/null >"$1" 2>"$2"', $script, $out, $err) { $start.ArgumentList.Add($a) }
+      $child = [Diagnostics.Process]::Start($start)
+    }
     $null = $child.Handle # PS 5.1 reports no ExitCode unless the handle is opened before exit.
     $child.WaitForExit()
     $gateExit = $child.ExitCode

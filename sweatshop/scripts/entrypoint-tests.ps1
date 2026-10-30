@@ -1,9 +1,16 @@
 ﻿# Complete entry-point tests with local repositories and fake command-line runtimes.
 $ErrorActionPreference = 'Stop'
-$root = Join-Path $env:TEMP ('sweatshop-entry-' + [guid]::NewGuid().ToString('N'))
+$root = Join-Path ([IO.Path]::GetTempPath()) ('sweatshop-entry-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory $root | Out-Null
 $ignore = Join-Path $root 'empty.ignore'; [IO.File]::WriteAllText($ignore, '')
 $oldPath = $env:PATH; $checks = 0
+$OnWindows = [Environment]::OSVersion.Platform -eq 'Win32NT'
+$PowerShellExe = if ($OnWindows) { 'powershell' } else { 'pwsh' }
+# A fake CLI in $bin: a .cmd on Windows, an executable shell script elsewhere.
+function FakeCli($name, $cmd, $sh) {
+  if ($OnWindows) { [IO.File]::WriteAllText("$bin/$name.cmd", "@echo off`r`n$cmd`r`n") }
+  else { [IO.File]::WriteAllText("$bin/$name", "#!/bin/sh`n$sh`n"); chmod +x "$bin/$name" }
+}
 function G {
   $ErrorActionPreference = 'Continue'
   $out = & git @args 2>&1
@@ -30,7 +37,7 @@ function Target($path, $stage) {
 function CopyScripts($path) {
   New-Item -ItemType Directory "$path/sweatshop" -Force | Out-Null
   Copy-Item -LiteralPath $PSScriptRoot -Destination "$path/sweatshop/scripts" -Recurse
-  # A Codex-model card: the proxy runs on the fake codex.cmd, never on a real CLI.
+  # A Codex-model card: the proxy runs on the fake codex, never on a real CLI.
   [IO.File]::WriteAllText("$path/sweatshop/proxy.md", "---`nname: proxy`nmodel: gpt-6.1-sol`neffort: high`n---`n`nYou stand in for the owner.`n")
 }
 try {
@@ -44,17 +51,17 @@ try {
   [IO.File]::WriteAllText("$target/new-uncommitted.txt", 'dirty')
   $bin = Join-Path $root 'bin'; New-Item -ItemType Directory $bin | Out-Null
   $calls = Join-Path $root 'unexpected-cli.txt'
-  [IO.File]::WriteAllText("$bin/codex.cmd", "@echo off`r`necho unexpected>>`"$calls`"`r`nexit /b 99`r`n")
-  $env:PATH = "$bin;$oldPath"
+  FakeCli codex "echo unexpected>>`"$calls`"`r`nexit /b 99" "echo unexpected >>'$calls'; exit 99"
+  $env:PATH = "$bin$([IO.Path]::PathSeparator)$oldPath"
   $beforeTarget = Snapshot $target; $beforeSource = Snapshot $source
   $log = Join-Path $root 'dryrun.log'
-  & powershell -NoProfile -ExecutionPolicy Bypass -File "$source/sweatshop/scripts/sweatshop.ps1" -Repo $target -Lineup Codex -DryRun *> $log
+  & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File "$source/sweatshop/scripts/sweatshop.ps1" -Repo $target -Lineup Codex -DryRun *> $log
   Assert ($LASTEXITCODE -eq 0) "DryRun failed: $(Get-Content $log -Raw)"
   Assert ((Snapshot $target) -eq $beforeTarget -and (Snapshot $source) -eq $beforeSource) 'DryRun changed source or dirty/offline target'
   Assert (-not (Test-Path $calls)) 'DryRun called/authenticated a runtime'
   Assert ((Get-Content $log -Raw) -match 'Would run T-2') 'Preview omitted session-only committed ticket'
   $checks++; Write-Host 'PASS dirty/offline DryRun is read-only and sees session-only tickets'
-  & powershell -NoProfile -ExecutionPolicy Bypass -File "$source/sweatshop/scripts/sweatshop.ps1" -Repo (Join-Path $root 'does-not-exist') -SelfCheck *> (Join-Path $root 'selfcheck.log')
+  & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File "$source/sweatshop/scripts/sweatshop.ps1" -Repo (Join-Path $root 'does-not-exist') -SelfCheck *> (Join-Path $root 'selfcheck.log')
   Assert ($LASTEXITCODE -eq 0 -and (Snapshot $source) -eq $beforeSource -and -not (Test-Path $calls)) 'SelfCheck touched source or depended on target/CLI'
   $checks++; Write-Host 'PASS SelfCheck is isolated from supplied target and CLI'
 
@@ -80,10 +87,10 @@ try {
   $target2 = Join-Path $root 'updatetarget'; Target $target2 blocked
   $targetRemote = Join-Path $root 'target-origin.git'; G init -q --bare -b main $targetRemote
   G -C $target2 remote add origin $targetRemote; G -C $target2 push -qu origin main
-  [IO.File]::WriteAllText("$bin/codex.cmd", "@echo off`r`nexit /b 0`r`n")
-  [IO.File]::WriteAllText("$bin/gh.cmd", "@echo off`r`nif `"%2`"==`"create`" echo https://fixture.invalid/pull/1`r`nexit /b 0`r`n")
+  FakeCli codex 'exit /b 0' 'exit 0'
+  FakeCli gh "if `"%2`"==`"create`" echo https://fixture.invalid/pull/1`r`nexit /b 0" '[ "$2" = create ] && echo https://fixture.invalid/pull/1; exit 0'
   $log = Join-Path $root 'update.log'
-  & powershell -NoProfile -ExecutionPolicy Bypass -File "$updating/sweatshop/scripts/sweatshop.ps1" -Repo $target2 -Lineup Codex -ImplementMinutes 2 -ReviewMinutes 3 *> $log
+  & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File "$updating/sweatshop/scripts/sweatshop.ps1" -Repo $target2 -Lineup Codex -ImplementMinutes 2 -ReviewMinutes 3 *> $log
   Assert ($LASTEXITCODE -eq 0) "Updated driver failed: $(Get-Content $log -Raw)"
   $output = Get-Content $log -Raw
   Assert ($output -match 'BOOT_V2' -and $output -match 'RUNTIME_V2' -and $output -match 'HELPER_V2' -and $output -notmatch '_V1') 'Update mixed executing versions'
@@ -93,9 +100,9 @@ try {
 
   # A junction reaches the real skills checkout and retains its update contract.
   $link = Join-Path $root 'linked-skill'
-  New-Item -ItemType Junction -Path $link -Target "$updating/sweatshop" | Out-Null
+  New-Item -ItemType $(if ($OnWindows) { 'Junction' } else { 'SymbolicLink' }) -Path $link -Target "$updating/sweatshop" | Out-Null
   $log = Join-Path $root 'junction.log'
-  & powershell -NoProfile -ExecutionPolicy Bypass -File "$link/scripts/sweatshop.ps1" -Repo $target2 -Lineup Codex *> $log
+  & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File "$link/scripts/sweatshop.ps1" -Repo $target2 -Lineup Codex *> $log
   Assert ($LASTEXITCODE -eq 0 -and (Get-Content $log -Raw) -match 'RUNTIME_V2') 'Junction install could not run the actual checkout'
   $checks++; Write-Host 'PASS junction install resolves the real checkout'
 
@@ -112,7 +119,7 @@ try {
   [IO.File]::WriteAllText("$holderPublisher/unrelated.txt", 'this remote must not be pulled')
   G -C $holderPublisher add .; G -C $holderPublisher commit -qm advance; G -C $holderPublisher push -q
   $beforeHolder = Snapshot $holder; $log = Join-Path $root 'copied-project.log'
-  & powershell -NoProfile -ExecutionPolicy Bypass -File "$holder/.claude/skills/sweatshop/scripts/sweatshop.ps1" -Repo $target2 -Lineup Codex *> $log
+  & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File "$holder/.claude/skills/sweatshop/scripts/sweatshop.ps1" -Repo $target2 -Lineup Codex *> $log
   Assert ($LASTEXITCODE -eq 0 -and (Snapshot $holder) -eq $beforeHolder) 'Copied project install updated its unrelated owner repository'
   $checks++; Write-Host 'PASS copied project install leaves its unrelated repository unchanged'
 
@@ -137,12 +144,13 @@ if ($args -contains 'read-only') {
 }
 $ping = [regex]::Match($prompt, '-File (\S+) -Repo (\S+) -Ping')
 if ($ping.Success) {
-  if (-not $env:FAKE_SKIP_PING) { & powershell -NoProfile -ExecutionPolicy Bypass -File $ping.Groups[1].Value -Repo $ping.Groups[2].Value -Ping | Out-Null }
+  $shell = if ([Environment]::OSVersion.Platform -eq 'Win32NT') { 'powershell' } else { 'pwsh' }
+  if (-not $env:FAKE_SKIP_PING) { & $shell -NoProfile -ExecutionPolicy Bypass -File $ping.Groups[1].Value -Repo $ping.Groups[2].Value -Ping | Out-Null }
   # What a call that hung in a sandbox leaves (measured 2026-10-29): run files, no receipt.
   else { $d = Join-Path ([IO.Path]::GetTempPath()) 'sweatshop-proxy'; New-Item -ItemType Directory -Force $d | Out-Null; [IO.File]::WriteAllText((Join-Path $d "$(Get-Date -Format yyyyMMdd-HHmmss)-ping-abc123.log.runtime.json"), '{"Result":"running"}') }
   Write-Output '{"type":"turn.completed"}'; exit 0
 }
-Add-Content (Join-Path $env:TEMP "fake-agent-env-$env:FAKE_SCENARIO.txt") "SWEATSHOP_PROXY=$env:SWEATSHOP_PROXY"
+Add-Content (Join-Path ([IO.Path]::GetTempPath()) "fake-agent-env-$env:FAKE_SCENARIO.txt") "SWEATSHOP_PROXY=$env:SWEATSHOP_PROXY"
 git checkout -qb t-1
 $ticket = Join-Path (Get-Location) '.scratch/feature/issues/T-1.md'
 if ($env:FAKE_SCENARIO -eq 'ask') {
@@ -154,10 +162,10 @@ if ($env:FAKE_SCENARIO -eq 'ask') {
 git add .; git commit -qm stage
 Write-Output '{"type":"turn.completed"}'
 '@)
-  [IO.File]::WriteAllText("$bin/codex.cmd", "@echo off`r`nif `"%1`"==`"login`" exit /b 0`r`npowershell -NoProfile -ExecutionPolicy Bypass -File `"$fake`" %*`r`nexit /b %errorlevel%`r`n")
-  $env:FAKE_SCENARIO = 'handoff'; Remove-Item (Join-Path $env:TEMP 'fake-agent-env-handoff.txt') -ErrorAction SilentlyContinue
+  FakeCli codex "if `"%1`"==`"login`" exit /b 0`r`npowershell -NoProfile -ExecutionPolicy Bypass -File `"$fake`" %*`r`nexit /b %errorlevel%" "[ `"`$1`" = login ] && exit 0; exec pwsh -NoProfile -File '$fake' `"`$@`""
+  $env:FAKE_SCENARIO = 'handoff'; Remove-Item (Join-Path ([IO.Path]::GetTempPath()) 'fake-agent-env-handoff.txt') -ErrorAction SilentlyContinue
   $log = Join-Path $root 'handoff.log'
-  & powershell -NoProfile -ExecutionPolicy Bypass -File "$source/sweatshop/scripts/sweatshop.ps1" -Repo $target3 -Lineup Codex *> $log
+  & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File "$source/sweatshop/scripts/sweatshop.ps1" -Repo $target3 -Lineup Codex *> $log
   Assert ($LASTEXITCODE -eq 0) "Recoverable handoff failure crashed: $(Get-Content $log -Raw)"
   $session = @(G -C $target3 for-each-ref '--format=%(refname:short)' refs/heads/sweatshop/)[0]
   Assert ((G -C $target3 show "${session}:.scratch/feature/issues/T-1.md") -match 'Stage: blocked') 'Invalid handoff not parked'
@@ -165,7 +173,7 @@ Write-Output '{"type":"turn.completed"}'
   $rows = Get-Content "$target3/.scratch/run-log.md" -Raw
   Assert ($rows -match 'incomplete handoff' -and $rows -notmatch '\| T-2 \|' -and $rows -notmatch '\| merged \|') 'Invalid done unlocked dependent or logged merge'
   Assert ((Get-Content $log -Raw) -match 'proxy: gpt-6\.1-sol high answered the ping' -and (Get-Content $log -Raw) -match 'proxy from Codex sessions: reached directly') "Ping not run or not reached: $(Get-Content $log -Raw)"
-  Assert ((Get-Content (Join-Path $env:TEMP 'fake-agent-env-handoff.txt')) -eq 'SWEATSHOP_PROXY=') 'A runtime that reached the proxy ran with the driver fallback'
+  Assert ((Get-Content (Join-Path ([IO.Path]::GetTempPath()) 'fake-agent-env-handoff.txt')) -eq 'SWEATSHOP_PROXY=') 'A runtime that reached the proxy ran with the driver fallback'
   $checks++; Write-Host 'PASS fake runtime invalid clean done parks recoverably without releasing dependent'
 
   # A runtime whose sessions cannot reach the proxy: its stages get SWEATSHOP_PROXY=driver, and the
@@ -173,16 +181,16 @@ Write-Output '{"type":"turn.completed"}'
   $target4 = Join-Path $root 'asking'; Target $target4 to-implement
   $remote4 = Join-Path $root 'asking-origin.git'; G init -q --bare -b main $remote4
   G -C $target4 remote add origin $remote4; G -C $target4 push -qu origin main
-  $env:FAKE_SCENARIO = 'ask'; $env:FAKE_SKIP_PING = '1'; Remove-Item (Join-Path $env:TEMP 'fake-agent-env-ask.txt') -ErrorAction SilentlyContinue
+  $env:FAKE_SCENARIO = 'ask'; $env:FAKE_SKIP_PING = '1'; Remove-Item (Join-Path ([IO.Path]::GetTempPath()) 'fake-agent-env-ask.txt') -ErrorAction SilentlyContinue
   $log = Join-Path $root 'asking.log'
-  & powershell -NoProfile -ExecutionPolicy Bypass -File "$source/sweatshop/scripts/sweatshop.ps1" -Repo $target4 -Lineup Codex *> $log
+  & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File "$source/sweatshop/scripts/sweatshop.ps1" -Repo $target4 -Lineup Codex *> $log
   $out = Get-Content $log -Raw
   Assert ($LASTEXITCODE -eq 0) "Asking run crashed: $out"
   Assert ($out -match 'proxy from Codex sessions: unreachable' -and $out -match 'asked a third time this run') "Driver fallback or cap missing: $out"
   $session = @(G -C $target4 for-each-ref '--format=%(refname:short)' refs/heads/sweatshop/)[0]
   $text = (G -C $target4 show "${session}:.scratch/feature/issues/T-1.md") -join "`n"
   Assert ($text -match 'Stage: blocked' -and ([regex]::Matches($text, '(?m)^- \d{4}-\d\d-\d\d Proxy decided \(gpt-6\.1-sol high\): seam A - fixture \(receipt [^)]+\.json\)$')).Count -eq 2) "Driver answers not recorded: $text"
-  Assert (@(Get-Content (Join-Path $env:TEMP 'fake-agent-env-ask.txt') | Where-Object { $_ -ne 'SWEATSHOP_PROXY=driver' }).Count -eq 0) 'Stage of an unreachable runtime did not get the driver fallback'
+  Assert (@(Get-Content (Join-Path ([IO.Path]::GetTempPath()) 'fake-agent-env-ask.txt') | Where-Object { $_ -ne 'SWEATSHOP_PROXY=driver' }).Count -eq 0) 'Stage of an unreachable runtime did not get the driver fallback'
   $checks++; Write-Host 'PASS unreachable proxy: the driver answers asked stages, twice per ticket per run'
   Write-Host "$checks entry-point checks passed. Fixtures/logs: $root"
 } finally { $env:PATH = $oldPath; $env:FAKE_SCENARIO = $null; $env:FAKE_SKIP_PING = $null }

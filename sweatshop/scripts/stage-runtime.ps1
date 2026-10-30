@@ -1,3 +1,7 @@
+# Windows PowerShell 5.1 has no $IsWindows; this reads the same on 5.1 and 7.
+$OnWindows = [Environment]::OSVersion.Platform -eq 'Win32NT'
+$PowerShellExe = if ($OnWindows) { 'powershell' } else { 'pwsh' }
+
 # Shared reads tolerate inherited writers; an exclusive lock gets bounded retries.
 # Callers retain read failures as infrastructure evidence, not empty successful output.
 function Read-StageLog($Path, [int]$TailBytes = 0) {
@@ -81,7 +85,11 @@ function RuntimeOf($model) { if ($model -match '/') { 'OpenCode' } elseif ($mode
 # What `claude --model` takes: `opus-5.5` is `claude-opus-5-5`. Codex names pass as written.
 function CliModel($model) { if ($model -match '^(gpt-|claude-)') { $model } else { 'claude-' + ($model -replace '\.', '-') } }
 function FindCli($runtime) {
-  $probe = if ($runtime -eq 'Claude') {
+  $probe = if (-not $OnWindows) {
+    # Native installers put the CLI in ~/.local/bin, which a service's PATH may lack.
+    "$HOME/.local/bin/$($runtime.ToLower())"
+    if ($runtime -eq 'OpenCode') { "$HOME/.opencode/bin/opencode" }
+  } elseif ($runtime -eq 'Claude') {
     # `claude` may not be on PATH: probe the installs the app and the CLI use.
     "$env:APPDATA\Claude\claude-code\*\claude.exe"
     "$env:USERPROFILE\AppData\Roaming\Claude\claude-code\*\claude.exe"

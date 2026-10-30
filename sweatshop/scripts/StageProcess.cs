@@ -1,13 +1,19 @@
 using System;
 using System.ComponentModel;
+using System.Diagnostics;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 
 // A suspended launch closes the race between creating children and assigning ownership.
 // The non-inheritable job handle also cleans up descendants if the driver itself dies.
+// Elsewhere the stage leads its own session (setsid), so one group signal reaches every
+// descendant that stays in it; a watchdog in the group kills it if the driver dies.
 public sealed class SweatshopStageProcess : IDisposable
 {
+    static readonly bool Windows = Environment.OSVersion.Platform == PlatformID.Win32NT;
     IntPtr job, process;
+    Process unix;
     public int Id { get; private set; }
     [StructLayout(LayoutKind.Sequential)] struct Security { public int Length; public IntPtr Descriptor; public int Inherit; }
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)] struct Startup {
@@ -38,6 +44,9 @@ public sealed class SweatshopStageProcess : IDisposable
     [DllImport("kernel32.dll", SetLastError = true)] static extern bool GetExitCodeProcess(IntPtr process, out uint code);
     [DllImport("kernel32.dll", SetLastError = true)] static extern uint WaitForSingleObject(IntPtr handle, uint ms);
     [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
+    [DllImport("libc", SetLastError = true)] static extern int kill(int pid, int sig);
+    // $1 log, $2 driver pid, then the CLI and its arguments. exec keeps the session leader's pid.
+    const string Launcher = "log=$1 driver=$2; shift 2; (while kill -0 $driver 2>/dev/null; do sleep 1; done; kill -KILL 0) </dev/null >/dev/null 2>&1 & exec \"$@\" </dev/null >>\"$log\" 2>>\"$log.err\"";
     static void Check(bool ok) { if (!ok) throw new Win32Exception(Marshal.GetLastWin32Error()); }
     static IntPtr Open(string path, uint access, uint disposition, ref Security security) {
         var handle = CreateFile(path, access, 7, ref security, disposition, 0x80, IntPtr.Zero);
@@ -46,6 +55,16 @@ public sealed class SweatshopStageProcess : IDisposable
     }
     public static SweatshopStageProcess Start(string exe, string args, string cwd, string log) {
         var owner = new SweatshopStageProcess();
+        if (!Windows) {
+            // FileShare is enforced here too: a log a reader holds exclusively fails, as CreateFile does.
+            foreach (var path in new[] { log, log + ".err" }) new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete).Dispose();
+            // Arguments, not ArgumentList: .NET splits this string by the same rules as a Windows command line.
+            var start = new ProcessStartInfo("setsid", "sh -c \"" + Launcher.Replace("\"", "\\\"") + "\" sweatshop-stage \"" + log + "\" " +
+                Process.GetCurrentProcess().Id + " \"" + exe + "\" " + args);
+            start.UseShellExecute = false; start.WorkingDirectory = cwd;
+            owner.unix = Process.Start(start); owner.Id = owner.unix.Id;
+            return owner;
+        }
         var info = new ProcessInfo();
         IntPtr input = IntPtr.Zero, output = IntPtr.Zero, error = IntPtr.Zero;
         try {
@@ -77,12 +96,19 @@ public sealed class SweatshopStageProcess : IDisposable
         }
     }
     public bool HasExited { get {
+        if (!Windows) return unix.HasExited;
         uint result = WaitForSingleObject(process, 0);
         if (result == UInt32.MaxValue) throw new Win32Exception(Marshal.GetLastWin32Error());
         return result == 0;
     } }
-    public int ExitCode { get { uint code; Check(GetExitCodeProcess(process, out code)); return unchecked((int)code); } }
+    public int ExitCode { get { if (!Windows) return unix.ExitCode; uint code; Check(GetExitCodeProcess(process, out code)); return unchecked((int)code); } }
     public void Stop() {
+        if (!Windows) {
+            // SIGTERM lets a CLI flush its session; SIGKILL after 3 s, like TerminateJobObject.
+            Signal(15); if (GroupGone(3000)) return;
+            Signal(9); if (GroupGone(5000)) return;
+            throw new InvalidOperationException("Stage process group still has processes after SIGKILL.");
+        }
         Check(TerminateJobObject(job, 1));
         var wait = System.Diagnostics.Stopwatch.StartNew();
         do {
@@ -93,7 +119,17 @@ public sealed class SweatshopStageProcess : IDisposable
         } while (wait.ElapsedMilliseconds < 5000);
         throw new InvalidOperationException("Stage job still has active processes after 5 seconds.");
     }
+    void Signal(int sig) { if (kill(-Id, sig) != 0 && Marshal.GetLastWin32Error() != 3) throw new Win32Exception(Marshal.GetLastWin32Error()); } // 3: ESRCH, group empty
+    bool GroupGone(int ms) {
+        var wait = Stopwatch.StartNew();
+        do {
+            if (kill(-Id, 0) != 0 && Marshal.GetLastWin32Error() == 3) return true;
+            System.Threading.Thread.Sleep(20);
+        } while (wait.ElapsedMilliseconds < ms);
+        return false;
+    }
     public void Dispose() {
+        if (unix != null) { unix.Dispose(); unix = null; }
         if (job != IntPtr.Zero) { CloseHandle(job); job = IntPtr.Zero; }
         if (process != IntPtr.Zero) { CloseHandle(process); process = IntPtr.Zero; }
     }
