@@ -56,7 +56,7 @@ shell, so it stops when that shell exits); its pid is `pgrep -f '<script> <repo>
 Not a background Bash/PowerShell task: those die at their `timeout`, 2 h at
 most. The detached driver does not show in the session's task pane;
 tell the human its pid and `.out` path. In Codex, a terminal session. A lineup the human asks for goes on the command line
-(`-Lineup` or `-Models`, as `sweatshop/SKILL.md` says), never into the binding;
+(`-Lineup` or `-Models`, as `sweatshop/SKILL.md` says), never into `lineups.md`;
 none asked for, run the default. A pause the human asks for is the driver's
 `STOP` file (`sweatshop/SKILL.md`), never a kill. Note the
 launch time and the last row of `<tracker>/run-log.md`: everything after that row

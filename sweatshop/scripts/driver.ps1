@@ -7,7 +7,7 @@
 
 .EXAMPLE
   .\sweatshop.ps1 D:\Desktop\Projects\SIGAA-ME
-  .\sweatshop.ps1 D:\Desktop\Projects\SIGAA-ME -Lineup opus   # the `Models (opus):` line
+  .\sweatshop.ps1 D:\Desktop\Projects\SIGAA-ME -Lineup opus   # the `Models (opus):` line of ../lineups.md
   .\sweatshop.ps1 D:\Desktop\Projects\SIGAA-ME -DryRun     # show what would run
 #>
 param(
@@ -17,7 +17,7 @@ param(
   [int]$ReviewMinutes = 240,
   [switch]$DryRun,
   [switch]$SelfCheck,
-  # The `Models (<name>):` line to run. Absent: the one `Models (default):` names.
+  # The `Models (<name>):` line of ../lineups.md to run. Absent: the one `Models (default):` names.
   [string]$Lineup,
   # A lineup for this run only, in the binding's own syntax: 'stage 2 gpt-6-luna max, stage 3 opus-5.5 high'.
   # Never written to the repo: editing the binding would dirty the tree Preflight wants clean.
@@ -85,17 +85,18 @@ function StageModel($line, $n) {
   if ($m.Groups[2].Success) { $m.Groups[2].Value } else { 'high' }
 }
 
-# A lineup is one `Models (<name>):` line. `Models (default): <name>` names the
-# lineup a run without -Lineup takes. Only the default falls back to the legacy
-# `Models (Claude):`, then `Models:`; a named lineup that is missing is refused, never borrowed.
+# A lineup is one `Models (<name>):` line in the skill's own `../lineups.md`, shared by
+# every repo so no repo's copy goes stale. `Models (default): <name>` names the lineup a
+# run without -Lineup takes; a named lineup that is missing is refused, never borrowed.
 # Not `$models`: PowerShell names are case-blind, and that is the -Models parameter.
 if ($Models -and $Lineup) { throw 'Pass -Lineup or -Models, not both.' }
-function LineupLine($name) { [regex]::Match($block, "(?im)^\s*-\s*Models \($([regex]::Escape($name))\):\s*(.+)$").Groups[1].Value.Trim() }
+if ($block -match '(?im)^\s*-\s*Models\b') { throw "Lineups are global now: delete the Models lines from $agents (they live in sweatshop/lineups.md)." }
+$LineupFile = Join-Path (Split-Path $PSScriptRoot) 'lineups.md'
+$lineups = if (Test-Path -LiteralPath $LineupFile) { Get-Content -LiteralPath $LineupFile -Raw -Encoding UTF8 } else { '' }
+function LineupLine($name) { [regex]::Match($lineups, "(?im)^\s*-\s*Models \($([regex]::Escape($name))\):\s*(.+)$").Groups[1].Value.Trim() }
 $LineupName = if ($Models) { 'ad hoc' } elseif ($Lineup) { $Lineup } else { 'default' }
 $line = if ($Models) { $Models } else { LineupLine $LineupName }
 if ($line -match '^[\w.-]+$') { $LineupName = $line; $line = LineupLine $LineupName }
-if (-not $line -and -not $Lineup -and -not $Models) { $LineupName = 'Claude'; $line = LineupLine 'Claude' }
-if (-not $line -and -not $Lineup -and -not $Models) { $line = [regex]::Match($block, '(?im)^\s*-\s*Models:\s*(.+)$').Groups[1].Value }
 $Model2, $Effort2 = StageModel $line 2
 $Model3, $Effort3 = StageModel $line 3
 # Only the implementer changes for a hard ticket: the reviewer has to be good enough for all of them.
@@ -103,7 +104,8 @@ $ModelHard, $EffortHard = StageModel $line 'hard'
 # The limits catch a hung session, not a slow one; a timeout spends no attempt (Stage-TimedOut).
 # Measured 2026-10-30: four lanes on one Linux notebook, a gate took 40-60 min (CLEAN-072's was
 # green at 51 min and killed at the 60-min limit in `flutter build web`). 240 is four such gates.
-if (-not ($Gate -and $Base -and $Model2 -and $Model3)) { throw "Bindings block incomplete for lineup '$LineupName' (Gate, Base branch, stage 2 and 3 models):`n$(if ($Models) { $Models } else { $block })" }
+if (-not ($Gate -and $Base)) { throw "Bindings block incomplete (Gate, Base branch):`n$block" }
+if (-not ($Model2 -and $Model3)) { throw "Lineup '$LineupName' has no stage 2 and stage 3 models in $(if ($Models) { '-Models' } else { $LineupFile }):`n$(if ($Models) { $Models } else { $lineups })" }
 # An unversioned alias moves when Anthropic ships the next model, and the lineup
 # changes under a run with nobody told. Pin it.
 foreach ($m in @($Model2, $Model3, $ModelHard) | Where-Object { $_ }) {

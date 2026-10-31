@@ -227,8 +227,8 @@ Three guards:
   `Driver retry:` note, stage 2 resumes the retained work.
 - **Wrong model, no work.** Inside a session branch (below), skip this guard:
   the driver picked your model, maybe from a lineup given only on its command
-  line. Otherwise read every `Models` line of the binding (`Models:`,
-  `Models (<lineup>):`). Each line is a lineup, and one lineup can mix runtimes,
+  line. Otherwise read every `Models (<lineup>):` line of the global
+  `sweatshop/lineups.md` (beside this skill's folder). Each line is a lineup, and one lineup can mix runtimes,
   so do not look only at the line named for yours. If no line gives this stage
   to your model, say which models do and stop. Codex does
   not tell a session its model name: there, trust the `--model` you were
@@ -358,26 +358,30 @@ evidence and integration/release impact.
 
 ## A repo with no bindings block
 
-Ask for the three values, write the block where it belongs, then get on with the
+Ask for the two values, write the block where it belongs, then get on with the
 work. Do not copy this skill into the repo — one copy of the standard is the point.
 
     ## Bindings do fluxo (skill `ticket-flow`)
 
     - Gate: `<command that runs typecheck + lint + tests>`
     - Base branch: `<name>`
-    - Models (default): <lineup>
-    - Models (<lineup>): stage 2 <model> [effort], hard <model> [effort], stage 3 <model> [effort]
     - Test files: `<regex>`
     - Sync gate: `<command>` (optional: a fuller gate the foreman runs once per session, at the sync)
 
+Models are not a repo binding. The lineups are global, in `sweatshop/lineups.md`
+(one copy for every repo, so none goes stale), and the driver refuses a `Models`
+line in a repo's block:
+
+    - Models (default): <lineup>
+    - Models (<lineup>): stage 2 <model> [effort], hard <model> [effort], stage 3 <model> [effort]
+
 Each `Models (<name>):` line is a lineup, chosen with `-Lineup <name>`.
 `Models (default):` lists no models: it names the lineup the driver runs without
-`-Lineup`. `sweatshop-codex.ps1` runs `-Lineup sol`. A repo with no `default`
-falls back to the legacy `Models (Claude):`, then `Models:`. The runtime follows
+`-Lineup`. `sweatshop-codex.ps1` runs `-Lineup sol`. The runtime follows
 the model, stage by stage (`gpt-*` runs in Codex, the rest in Claude Code), so
 one lineup can mix both. Claude models always carry a version (`opus-5.5`,
 `sonnet-5`, `fable-5.1`; `opus 5.5` also works): the driver refuses a bare
-`opus`. Include only the lineups the repo uses. `[effort]` is optional; without
+`opus`. `[effort]` is optional; without
 it, `high`.
 
 `hard` is the implementer for `Difficulty: hard` tickets and for tickets that

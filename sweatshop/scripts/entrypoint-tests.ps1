@@ -30,13 +30,16 @@ function Snapshot($path) {
 }
 function Target($path, $stage) {
   Init $path; New-Item -ItemType Directory "$path/.scratch/feature/issues" -Force | Out-Null
-  [IO.File]::WriteAllText("$path/AGENTS.md", "## Bindings do fluxo`n- Gate: ``fixture gate```n- Base branch: ``main```n- Models (Codex): stage 2 gpt-6.1-sol high, stage 3 gpt-6.1-sol max`n")
+  [IO.File]::WriteAllText("$path/AGENTS.md", "## Bindings do fluxo`n- Gate: ``fixture gate```n- Base branch: ``main```n")
   [IO.File]::WriteAllText("$path/.scratch/feature/issues/T-1.md", "# T-1: fixture`nStage: $stage`nBlocked by: none`n")
   G -C $path add .; G -C $path commit -qm base
 }
+# Lineups live beside the scripts, global to every repo; the fixture's is the Codex pair.
+function Lineups($skill) { [IO.File]::WriteAllText("$skill/lineups.md", "- Models (Codex): stage 2 gpt-6.1-sol high, stage 3 gpt-6.1-sol max`n") }
 function CopyScripts($path) {
   New-Item -ItemType Directory "$path/sweatshop" -Force | Out-Null
   Copy-Item -LiteralPath $PSScriptRoot -Destination "$path/sweatshop/scripts" -Recurse
+  Lineups "$path/sweatshop"
   # A Codex-model card: the proxy runs on the fake codex, never on a real CLI.
   [IO.File]::WriteAllText("$path/sweatshop/proxy.md", "---`nname: proxy`nmodel: gpt-6.1-sol`neffort: high`n---`n`nYou stand in for the owner.`n")
 }
@@ -111,6 +114,7 @@ try {
   $holder = Join-Path $root 'unrelated-project'; Init $holder
   New-Item -ItemType Directory "$holder/.claude/skills/sweatshop" -Force | Out-Null
   Copy-Item -LiteralPath $PSScriptRoot -Destination "$holder/.claude/skills/sweatshop/scripts" -Recurse
+  Lineups "$holder/.claude/skills/sweatshop"
   G -C $holder add .; G -C $holder commit -qm copiedskill
   $holderRemote = Join-Path $root 'unrelated-origin.git'; G init -q --bare -b main $holderRemote
   G -C $holder remote add origin $holderRemote; G -C $holder push -qu origin main

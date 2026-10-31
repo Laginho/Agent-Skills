@@ -195,22 +195,23 @@ never have to. In Claude Code or OpenCode run `scripts/sweatshop.ps1`; in Codex 
 recursive search from the skills directory if needed. Never select the runtime
 from which CLIs happen to be installed: several can be installed on one machine.
 
-The target repo's `## Bindings do fluxo` block supplies the lineups, one
-`Models (<name>)` line each. `Models (default): sol` names the lineup a run
-with no `-Lineup` takes; `-Lineup opus` reads `Models (opus):` and never falls
-back. A repo with no `default` line falls back to the legacy `Models (Claude):`,
-then `Models:`. The driver refuses a missing line instead of guessing a model.
+The lineups are global: [`lineups.md`](lineups.md), beside this file, holds one
+`Models (<name>)` line each for every repo. `Models (default): terra` names the
+lineup a run with no `-Lineup` takes; `-Lineup opus` reads `Models (opus):` and
+never falls back. The repo's `## Bindings do fluxo` block keeps only its own
+values (gate, base branch); a `Models` line there is refused, so no repo carries
+a stale copy. The driver refuses a missing lineup instead of guessing a model.
 Choosing the lineup:
 
-- The user names a binding line ("the opus lineup", "run it on opus"): `-Lineup opus`.
+- The user names a lineup ("the opus lineup", "run it on opus"): `-Lineup opus`.
 - The user spells out models ("luna max implements, opus 5.5 reviews"): pass them
-  for this run only, in the binding's syntax:
+  for this run only, in the lineup syntax:
   `-Models 'stage 2 gpt-6-luna max, stage 3 opus-5.5 high'`.
 - Neither: no flag, the default line.
 
-Never edit the binding to run a lineup. The edit dirties the tree Preflight wants
-clean, and it changes the repo's default for every later run. A lineup worth
-keeping goes into the binding by a commit the user asked for.
+Never edit `lineups.md` to run a lineup: it changes the default for every repo and
+every later run. A lineup worth keeping goes into `lineups.md` by a commit the
+user asked for.
 
 A Codex model may end in `fast` (`stage 2 gpt-6.1-sol high fast`): the stage runs
 on Codex's priority tier (`service_tier=fast`, the CLI's `/fast`) and logs as
@@ -221,12 +222,8 @@ Codex's `RUST_LOG=codex_otel=info` line (`service_tier="priority"`) and the spee
 
 Claude models carry their version (`opus-5.5`, `sonnet-5`, `fable-5.1`,
 `haiku-4.5`; `opus 5.5` reads the same). An unversioned `opus` is refused: an
-alias moves when a new model ships, and the lineup would change unannounced. For
-example:
-
-    - Models (default): sol
-    - Models (sol): stage 2 gpt-6.1-sol high, hard gpt-6.1-sol xhigh, stage 3 gpt-6.1-sol xhigh
-    - Models (opus): stage 2 opus-5.5 high, hard opus-5.5 xhigh, stage 3 opus-5.5 xhigh
+alias moves when a new model ships, and the lineup would change unannounced. See
+`lineups.md` for the current lines.
 
 A mixed lineup needs both CLIs installed and logged in; the driver checks at start.
 
