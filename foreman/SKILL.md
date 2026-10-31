@@ -389,6 +389,8 @@ across runs. Fewer than three: the summary is enough.
   The summary names both commits next to the PDF link; no hashes there means the
   report was not recorded.
 - **Build:** any LaTeX engine on the PATH (`tectonic -X compile <file>.tex`).
+  The preamble loads `fontspec`, not `inputenc`/`fontenc`: Tectonic is XeTeX, and the T1
+  font drops — and … (measured 2026-10-31).
   Recompile until there are no overfull-box warnings. None: Codex's bundled
   Tectonic under `~/.codex/.tmp/`, which a `codex update` can delete. Still none: commit the `.tex`, say so in the summary, and offer to
   download Tectonic from its GitHub release into a folder on the PATH.
