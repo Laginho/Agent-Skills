@@ -415,7 +415,8 @@ function Verdict($log) {
 $CodexPrices = @{
   'gpt-6-astra' = 10.00, 1.00, 12.50, 50.00
   'gpt-6-sol'   = 2.00, 0.20, 2.50, 10.00
-  'gpt-6.1-sol' = 2.00, 0.20, 2.50, 10.00
+  'gpt-6.1-sol' = 2.00, 0.10, 2.50, 10.00
+  'gpt-6.1-terra' = 1.00, 0.05, 1.25, 5.00
   'gpt-6-luna'  = 0.10, 0.01, 0.125, 0.50
   'gpt-5.6-sol' = 4.00, 0.40, 5.00, 20.00   # promo price, through at least 2026-11-21
   # Not on OpenAI's price page, backing model unknown; priced as gpt-5.6-luna (standard tier).
