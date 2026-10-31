@@ -124,7 +124,7 @@ model's CLI read-only, prints the answer and the `Proxy decided (<model>)` or
   leaves its row for reconciliation by the foreman.
 - Each CLI launches suspended into its own Windows Job Object before running.
   Normal exit, a ten-second grace after a terminal runtime event, or the stage
-  timeout closes that job and its descendants. On Linux (`pwsh` 7) the job is a
+  time limit (below) closes that job and its descendants. On Linux (`pwsh` 7) the job is a
   transient systemd user scope: its cgroup keeps descendants that start a new
   session (Codex does, per tool command), they get SIGTERM, then `cgroup.kill`
   after 3 s, and a watchdog in the scope kills it if the driver dies. A Linux
@@ -133,12 +133,26 @@ model's CLI read-only, prints the answer and the `Proxy decided (<model>)` or
   and cleanup in their QA kit. Committed ticket state decides success; a final
   message or terminal event alone does not. Log reads retry sharing violations
   briefly; unavailable evidence parks the ticket as an infrastructure failure.
-- Before resetting dirty work or dropping a failed attempt's branch, retain
-  commits under `refs/sweatshop-recovery/`, stash tracked/untracked edits when
-  present, and append the references to `run-log/recovery.txt`. Recovery refs are
-  outside ticket branch discovery. The foreman inspects them before retrying.
+- Before resetting dirty work, stash tracked/untracked edits under
+  `refs/sweatshop-recovery/` and append the reference to `run-log/recovery.txt`.
+  Recovery refs are outside ticket branch discovery. The foreman inspects them before retrying.
+- **A retry resumes.** A stage 2 that stopped short of `to-review` keeps its
+  branch. If the branch says `implementing` (stage 3's: `reviewing`), the driver
+  commits it back to `to-implement` (`to-review`) on that branch, unpushed, with a
+  `Driver retry: <why>` note, so the next session resumes the commits instead of
+  stopping on a stage found mid-run. Measured 2026-10-30: CLEAN-072, CLEAN-073,
+  CLEAN-079 and APP-048 each spent attempt 2 stopping on `implementing`.
+- **The time limit is a backstop for hangs.** `-ImplementMinutes` and
+  `-ReviewMinutes` default to 240: on 2026-10-30, four lanes on one Linux notebook,
+  a gate alone took 40–60 min, and stages killed at the old 60-min limit spent
+  attempts on real work. Pass lower or higher values for one run. A stage the limit
+  kills spends no attempt and writes no `Attempt N failed`: its row says
+  `timeout, not counted`, edits it left are saved as above, and the ticket runs
+  again from its branch. Two timeouts in a row on one ticket (one run) park it:
+  row `timeout, parked`, `Stage: blocked` on the session with a `Stage stopped
+  (timeout)` note for the foreman, branch already resumable.
 - Under `## Comments` of a ticket, committed on the session: `Attempt N failed:
-  <reason>` after a stage 2 that did not reach `to-review`; `Stage: blocked`
+  <reason>` after a stage 2 that did not reach `to-review` for any other reason; `Stage: blocked`
   after the second, or at once when the session ended on a question or committed `blocked` itself (its whole last message is kept). A stage
   that asked keeps its commits: the driver renames its branch to
   `recovery/asked/<yyyymmdd-hhmmss>/<ID>` and names it in the note, so the answer can

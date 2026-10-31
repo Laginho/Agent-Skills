@@ -13,8 +13,8 @@
 param(
   [Parameter(Mandatory)][string]$Repo,
   [string]$Tracker = '.scratch',
-  [int]$ImplementMinutes = 60,
-  [int]$ReviewMinutes = 60,
+  [int]$ImplementMinutes = 240,
+  [int]$ReviewMinutes = 240,
   [switch]$DryRun,
   [switch]$SelfCheck,
   # The `Models (<name>):` line to run. Absent: the one `Models (default):` names.
@@ -100,9 +100,9 @@ $Model2, $Effort2 = StageModel $line 2
 $Model3, $Effort3 = StageModel $line 3
 # Only the implementer changes for a hard ticket: the reviewer has to be good enough for all of them.
 $ModelHard, $EffortHard = StageModel $line 'hard'
-# The limits catch a hung session, not a slow one. Measured 2026-10-17: with four lanes a
-# review that commits a fix reruns a 9-15 min gate, and five such reviews died at 20 min;
-# implements reached 44-45 of 45 min.
+# The limits catch a hung session, not a slow one; a timeout spends no attempt (Stage-TimedOut).
+# Measured 2026-10-30: four lanes on one Linux notebook, a gate took 40-60 min (CLEAN-072's was
+# green at 51 min and killed at the 60-min limit in `flutter build web`). 240 is four such gates.
 if (-not ($Gate -and $Base -and $Model2 -and $Model3)) { throw "Bindings block incomplete for lineup '$LineupName' (Gate, Base branch, stage 2 and 3 models):`n$(if ($Models) { $Models } else { $block })" }
 # An unversioned alias moves when Anthropic ships the next model, and the lineup
 # changes under a run with nobody told. Pin it.
@@ -329,6 +329,9 @@ function RunStage($t, $model, $effort, $minutes, $label) {
   $env:SWEATSHOP_PROXY = $null
   $script:LastInfrastructureError = $run.InfrastructureError
   $script:LastShutdownSeconds = $run.ShutdownSeconds
+  # Consecutive timeouts per ticket, this run; any other ending starts the count over.
+  if (-not $script:Timeouts) { $script:Timeouts = @{} }
+  if ($run.Result -eq 'timeout') { $script:Timeouts[$t.Id]++ } else { $script:Timeouts.Remove($t.Id) }
   try {
     if ($rt -eq 'Claude') {
       try { $j = (Read-StageLog $log) | ConvertFrom-Json } catch { $j = $null }
@@ -340,7 +343,8 @@ function RunStage($t, $model, $effort, $minutes, $label) {
       Add-Content $log "`nAPI Error: $rt exited $($run.ExitCode)`n$(Read-StageLog "$log.err")"
     }
     # A stage is handed off by commits, never by a dirty Stage: line or final message.
-    if (-not $script:LastInfrastructureError -and (GitOk status --porcelain)) {
+    # A kill mid-edit is not a handoff: Reset-Tree saves the edits and the stage resumes.
+    if (-not $script:LastInfrastructureError -and $run.Result -ne 'timeout' -and (GitOk status --porcelain)) {
       $script:LastFailureKind = 'incomplete handoff'
       $script:LastInfrastructureError = 'Stage left uncommitted work; saved for recovery.'
     }
@@ -573,18 +577,15 @@ function Remove-TicketWorktrees($t) {
   }
 }
 
-# Back to a clean loop base (the session); drop the ticket's branch if asked.
-function Reset-Tree($t, [switch]$DropBranch) {
+# Back to a clean loop base (the session). The ticket's branch stays: a retry resumes it.
+function Reset-Tree($t) {
   if ($t) { Remove-TicketWorktrees $t }
-  # Save before checkout -f/clean, including untracked files and committed attempts.
-  if ((GitOk status --porcelain) -or $DropBranch) {
+  # Save before checkout -f/clean, including untracked files.
+  if (GitOk status --porcelain) {
     $stamp = [guid]::NewGuid().ToString('N')
     $ref = "refs/sweatshop-recovery/$stamp"
-    $head = GitOk rev-parse HEAD
-    if (GitOk status --porcelain) {
-      GitOk stash push --include-untracked -m "sweatshop recovery $stamp" | Out-Null
-      $head = GitOk rev-parse 'stash@{0}'
-    } elseif ($t -and (git branch --list $t.Branch)) { $head = GitOk rev-parse $t.Branch }
+    GitOk stash push --include-untracked -m "sweatshop recovery $stamp" | Out-Null
+    $head = GitOk rev-parse 'stash@{0}'
     GitOk update-ref $ref $head
     $record = "$ref $head; ticket $(if ($t) { $t.Id }); log $script:LastLog"
     Add-Content -Encoding UTF8 (Join-Path $RunDir 'recovery.txt') $record
@@ -595,12 +596,11 @@ function Reset-Tree($t, [switch]$DropBranch) {
   # 2026-09-15: that turned one bad $Loop into 70 minutes of wrong work.
   GitOk checkout -q -f $Loop | Out-Null
   git reset -q --hard; git clean -qfd
-  if ($DropBranch -and (git branch --list $t.Branch)) { git branch -q -D $t.Branch }
 }
 
 # Append to `## Comments` on the loop base and commit (the driver's only edits).
 # $details (a proxy's full answer) goes quoted under the line.
-function Note($t, $line, $stage, $details) {
+function Note($t, $line, $stage, $details, [switch]$NoPush) {
   $text = Get-Content $t.File -Raw -Encoding UTF8
   if ($text -notmatch '(?m)^## Comments') { $text = $text.TrimEnd() + "`n`n## Comments`n" }
   $text = $text.TrimEnd() + "`n`n- $(Get-Date -Format yyyy-MM-dd) $line`n"
@@ -613,7 +613,55 @@ function Note($t, $line, $stage, $details) {
   $subject, $body = $line -split ' Log tail: ', 2
   [IO.File]::WriteAllText($msg, "chore: $subject ($($t.Id))$(if ($body) { "`n`nLog tail: $body" })", [Text.UTF8Encoding]::new($false))
   GitOk add $t.File; GitOk commit -q -F $msg | Out-Null
-  GitOk push -q
+  if (-not $NoPush) { GitOk push -q }
+}
+
+# A retry the driver owns resumes the attempt's commits. Left at `implementing` (or `reviewing`),
+# the branch is undispatchable and the next session stops on it (ticket-flow: a stage found
+# mid-run stops). Measured 2026-10-30: CLEAN-072, CLEAN-073, CLEAN-079 and APP-048 each spent
+# attempt 2 that way. Never pushed: a ticket branch is pushed by its stages only (foreman, Hands off).
+function Resume-Branch($t, $why) {
+  $back = @{ 'implementing' = 'to-implement'; 'reviewing' = 'to-review' }[$t.Stage]
+  if (-not $back) { return }
+  GitOk checkout -q ($t.Branch -replace '^origin/', '')
+  try { Note $t "Driver retry: $why. Resume from this branch's commits; edits the stage left uncommitted are saved in run-log/recovery.txt." $back -NoPush }
+  finally { GitOk checkout -q -f $Loop | Out-Null }
+}
+
+# A stage the time limit killed was slow or hung, not wrong: no attempt spent, and the next
+# one resumes. Two in a row on one ticket look like a hang: parked for the foreman, the way
+# Park-Infrastructure parks, with the branch already resumable.
+function Stage-TimedOut($t, $stage, $model, $attempt, $started, $minutes) {
+  Resume-Branch $t "the $stage stage hit the $minutes-minute limit"
+  if ($script:Timeouts[$t.Id] -lt 2) { LogStage $t $stage $model $attempt 'timeout, not counted' $started; return }
+  $script:Timeouts.Remove($t.Id)
+  LogStage $t $stage $model $attempt 'timeout, parked' $started
+  Note $t "Stage stopped (timeout): two $stage attempts in a row hit the $minutes-minute limit; no attempt spent. Foreman: if $script:LastLog shows real progress, raise the limit; if it shows a hang, fix the cause. Then set this Stage back to resume from branch $($t.Branch)." 'blocked'
+}
+
+# Stage 2 ended short of `to-review`. Only a real failure spends one of the two attempts.
+function Implement-Stopped($t, $impl, $attempt, $started, $res, $before) {
+  $tail = LogTail $script:LastLog
+  # A killed log can end on a `?` mid-stream; only a committed `blocked` is a question then.
+  $why = if ($res -eq 'timeout') { 'timeout' } else { Verdict $script:LastLog }
+  # A session that committed `blocked` itself stopped to ask, question mark or not.
+  # Measured 2026-09-24: PHY-32 ended on prose, read as a failure, burned attempt 2
+  # and lost its question with the dropped branch. Keep the whole last message.
+  if ($t.Stage -eq 'blocked') { $why = 'asked'; $tail = LogTail $script:LastLog 6000 }
+  Reset-Tree $t
+  if ($why -eq 'asked') {
+    # Keep what the attempt built, under another name. Measured 2026-09-30: four asks
+    # lost their diagnosis and mutate-verify tables with the dropped branch, and the
+    # answers said "resume from these commits".
+    $kept = Keep-Asked $t
+    Note $t "Attempt $attempt stopped to ask$($kept): $tail" 'blocked'; LogStage $t 'implement' $impl $attempt 'asked, blocked' $started
+    Answer-Asked $t $before $tail; return
+  }
+  if ($why -eq 'timeout') { Stage-TimedOut $t 'implement' $impl $attempt $started $ImplementMinutes; return }
+  if ($why -eq 'api-error') { Resume-Branch $t 'API error'; LogStage $t 'implement' $impl $attempt 'api error, not counted' $started; ApiDown $tail; return }
+  Resume-Branch $t "attempt $attempt ended short of to-review ($res)"
+  if ($attempt -ge 2) { Note $t "Attempt $attempt failed: $res; blocked after two attempts. Log tail: $tail" 'blocked'; LogStage $t 'implement' $impl $attempt "failed ($res), blocked" $started }
+  else { Note $t "Attempt $attempt failed: $res. Log tail: $tail"; LogStage $t 'implement' $impl $attempt "failed ($res), will retry" $started }
 }
 
 # --- the proxy ------------------------------------------------------------------------
@@ -1008,9 +1056,6 @@ while (-not (StopAsked) -and ($t = NextTicket)) {
   if (-not $script:ProxyVia) { Ping-Proxy }
   $before = $t.Text
   if ($t.Stage -eq 'to-implement') {
-    # A reopened ticket's branch holds the previous pass (tests + code): only a
-    # branch this attempt created is safe to drop.
-    $hadBranch = [bool](git branch --list $t.Branch)
     $m2, $e2 = Implementer $t
     $impl = "$m2 $e2"
     if ($m2 -ne $Model2) { Say "$($t.Id): hard implementer ($(if ($t.Difficulty -eq 'hard') { 'Difficulty: hard' } else { "$($t.Reopens) reopens" }))" }
@@ -1019,26 +1064,7 @@ while (-not (StopAsked) -and ($t = NextTicket)) {
     if ($DryRun) { break }
     if (Park-Infrastructure $t 'implement' $impl $attempt $started) { continue }
     $t = Ticket (Join-Path $Repo $t.File)
-    if ($t.Stage -ne 'to-review') {
-      $tail = LogTail $script:LastLog; $why = Verdict $script:LastLog
-      # A session that committed `blocked` itself stopped to ask, question mark or not.
-      # Measured 2026-09-24: PHY-32 ended on prose, read as a failure, burned attempt 2
-      # and lost its question with the dropped branch. Keep the whole last message.
-      if ($t.Stage -eq 'blocked') { $why = 'asked'; $tail = LogTail $script:LastLog 6000 }
-      Reset-Tree $t -DropBranch:(-not $hadBranch -and $why -ne 'asked')
-      if ($why -eq 'api-error') { LogStage $t 'implement' $impl $attempt 'api error, not counted' $started; ApiDown $tail; continue }
-      if ($why -eq 'asked') {
-        # Keep what the attempt built, under another name. Measured 2026-09-30: four asks
-        # lost their diagnosis and mutate-verify tables with the dropped branch, and the
-        # answers said "resume from these commits".
-        $kept = Keep-Asked $t
-        Note $t "Attempt $attempt stopped to ask$($kept): $tail" 'blocked'; LogStage $t 'implement' $impl $attempt 'asked, blocked' $started
-        Answer-Asked $t $before $tail; continue
-      }
-      if ($attempt -ge 2) { Note $t "Attempt $attempt failed: $res; blocked after two attempts. Log tail: $tail" 'blocked'; LogStage $t 'implement' $impl $attempt "failed ($res), blocked" $started }
-      else { Note $t "Attempt $attempt failed: $res. Log tail: $tail"; LogStage $t 'implement' $impl $attempt "failed ($res), will retry" $started }
-      continue
-    }
+    if ($t.Stage -ne 'to-review') { Implement-Stopped $t $impl $attempt $started $res $before; continue }
     LogStage $t 'implement' $impl $attempt 'to-review' $started
     if (StopAsked) { break }
   }
@@ -1050,6 +1076,7 @@ while (-not (StopAsked) -and ($t = NextTicket)) {
   GitOk pull -q --ff-only
   $t = Ticket (Join-Path $Repo $t.File)
   $names = @{ 'done' = 'merged'; 'to-merge' = 'waiting for you'; 'to-implement' = 'reopened' }
+  if (-not $names[$t.Stage] -and $res -eq 'timeout') { Stage-TimedOut $t 'review' "$Model3 $Effort3" $attempt $started $ReviewMinutes; continue }
   if (-not $names[$t.Stage] -and (Verdict $script:LastLog) -eq 'api-error') {
     LogStage $t 'review' "$Model3 $Effort3"$attempt 'api error, not counted' $started; ApiDown (LogTail $script:LastLog); continue
   }

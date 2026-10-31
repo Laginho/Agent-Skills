@@ -285,7 +285,7 @@ Check 'lanes keep to their own folder and session' {
     Assert ($refused -match 'A session without a lane is open') "Lane ran beside a lane-less session: $refused"
   } finally { $script:Lane = $null; Pop-Location }
 }
-Check 'retry drops a ticket branch held by a leftover stage worktree and keeps its work' {
+Check 'reset frees a ticket branch held by a leftover stage worktree and keeps its work' {
   Fixture worktree; Push-Location $Repo
   try {
     WriteTicket T-1 to-implement; StartSession
@@ -293,10 +293,11 @@ Check 'retry drops a ticket branch held by a leftover stage worktree and keeps i
     $wt = Join-Path $root 'worktree-T-1'
     GitOk worktree add -q -b t-1 $wt $Loop
     [IO.File]::WriteAllText("$wt/attempt.txt", 'uncommitted attempt')
-    Reset-Tree ([pscustomobject]@{ Id = 'T-1'; Branch = 't-1' }) -DropBranch
+    Reset-Tree ([pscustomobject]@{ Id = 'T-1'; Branch = 't-1' })
     Assert (-not (Test-Path $wt)) 'Leftover worktree survived the reset'
-    Assert (-not (git branch --list t-1)) 'Ticket branch survived, so the retry reads a stale stage'
-    $saved = (Get-Content (Join-Path $RunDir 'recovery.txt')) -match 'worktree'
+    Assert (git branch --list t-1) 'Ticket branch dropped, so the retry has nothing to resume'
+    GitOk checkout -q t-1; GitOk checkout -q $Loop   # free for Resume-Branch to check out
+    $saved = @(Get-Content (Join-Path $RunDir 'recovery.txt')) -match 'worktree'
     Assert $saved 'Worktree recovery not recorded'
     $ref = ($saved[0] -split ' ')[0]
     Assert ((GitOk show "${ref}^3:attempt.txt") -eq 'uncommitted attempt') 'Uncommitted worktree work lost'
@@ -423,6 +424,76 @@ Check 'an asked reopen resumes after the answer: its stale blocked branch is kep
     $branch = [regex]::Match($kept, '`([^`]+)`').Groups[1].Value
     Assert ((GitOk show "${branch}:pass1.ts") -eq 'previous pass') 'The previous pass was lost'
   } finally { $env:FAKE_PROXY_ANSWER = $null; $script:Asked = $null; Pop-Location }
+}
+# A stage 2 the driver stopped: its branch holds a red test and `implementing`, as on 2026-10-30.
+function StoppedStage($name, $stage = 'implementing', $log = 'gate still running, 954 passed so far. Done?') {
+  $origin = Join-Path $root "$name-origin.git"; GitOk init -q --bare -b main $origin
+  WriteTicket T-1 to-implement; StartSession; GitOk remote add origin $origin; GitOk push -q -u origin $Loop
+  $script:RunDir = Join-Path $root "$name-run"; New-Item -ItemType Directory $RunDir -Force | Out-Null
+  $script:RunLog = Join-Path $RunDir 'run-log.md'; $script:LastUsage = $null; $script:LastShutdownSeconds = $null
+  # Ends on `?`: a killed log is not a question.
+  $script:LastLog = Join-Path $RunDir "$name.txt"; [IO.File]::WriteAllText($LastLog, $log)
+  $script:ImplementMinutes = 240; $script:ReviewMinutes = 240; $script:Timeouts = @{}
+  GitOk checkout -qb T-1-work; [IO.File]::WriteAllText("$Repo/a.test.ts", 'red'); WriteTicket T-1 $stage
+  GitOk add .; GitOk commit -qm red; GitOk checkout -q $Loop
+  $t = Ticket "$Repo/.scratch/feature/issues/T-1.md"
+  Assert ($t.Stage -eq $stage) "Fixture reads $($t.Stage)"
+  $t
+}
+function SessionTicket { Get-Content "$Repo/.scratch/feature/issues/T-1.md" -Raw }
+Check 'a timeout spends no attempt and the retry resumes past implementing' {
+  Fixture timeout; Push-Location $Repo
+  try {
+    $t = @(StoppedStage timeout)[-1]
+    $script:Timeouts['T-1'] = 1
+    Implement-Stopped $t 'm high' 1 (Get-Date) 'timeout' $t.Text
+    Assert ((SessionTicket) -notmatch 'Attempt \d+ failed|Stage: blocked') "Timeout spent an attempt: $(SessionTicket)"
+    Assert ((Get-Content $RunLog -Raw) -match '\| T-1 \| implement \| m high \| 1 \| timeout, not counted \|') 'Run log row'
+    $next = NextTicket
+    Assert ($next.Id -eq 'T-1' -and $next.Stage -eq 'to-implement') "Not retried: $($next.Stage)"
+    Assert ($next.Text -match 'Driver retry: the implement stage hit the 240-minute limit') 'No resume note on the branch'
+    Assert ((GitOk show T-1-work:a.test.ts) -eq 'red') 'The attempt''s commits are gone'
+    NoneInflight
+  } finally { Pop-Location }
+}
+Check 'two timeouts in a row park the ticket for the foreman, resumable' {
+  Fixture timeout2; Push-Location $Repo
+  try {
+    $t = @(StoppedStage timeout2)[-1]
+    $script:Timeouts['T-1'] = 2
+    Implement-Stopped $t 'm high' 1 (Get-Date) 'timeout' $t.Text
+    $session = SessionTicket
+    Assert ($session -match 'Stage: blocked' -and $session -match 'Stage stopped \(timeout\): two implement attempts in a row hit the 240-minute limit') "Not parked: $session"
+    Assert ($session -notmatch 'Attempt \d+ failed') 'Park spent an attempt'
+    Assert ((Get-Content $RunLog -Raw) -match '\| timeout, parked \|' -and -not $Timeouts['T-1']) 'Park not logged, or the count survived it'
+    Assert (-not (NextTicket)) 'Parked ticket still runs'
+    # The foreman's unpark lands on a resumable branch.
+    WriteTicket T-1 to-implement; GitOk commit -qam unpark
+    Assert ((NextTicket).Stage -eq 'to-implement') 'Unparked ticket reads implementing'
+  } finally { Pop-Location }
+}
+Check 'a review timeout resumes at to-review' {
+  Fixture reviewtimeout; Push-Location $Repo
+  try {
+    $t = @(StoppedStage reviewtimeout reviewing)[-1]
+    $script:Timeouts['T-1'] = 1
+    Stage-TimedOut $t 'review' 'r high' 1 (Get-Date) 240
+    Assert ((NextTicket).Stage -eq 'to-review') 'Review timeout left reviewing'
+  } finally { Pop-Location }
+}
+Check 'a failed attempt the driver retries resumes past implementing; the second blocks' {
+  Fixture failed; Push-Location $Repo
+  try {
+    $t = @(StoppedStage failed 'implementing' 'Gate interrupted after ten minutes.')[-1]
+    Implement-Stopped $t 'm high' 1 (Get-Date) 'exit 0' $t.Text
+    Assert ((SessionTicket) -match 'Attempt 1 failed: exit 0' -and (SessionTicket) -notmatch 'Stage: blocked') 'Attempt 1 not recorded'
+    $next = NextTicket
+    Assert ($next.Stage -eq 'to-implement' -and $next.Text -match 'Driver retry: attempt 1 ended short of to-review') "Retry reads $($next.Stage)"
+    Assert ((GitOk show T-1-work:a.test.ts) -eq 'red') 'The attempt''s commits are gone'
+    GitOk checkout -q T-1-work; WriteTicket T-1 implementing; GitOk commit -qam again; GitOk checkout -q $Loop
+    Implement-Stopped (Ticket "$Repo/.scratch/feature/issues/T-1.md") 'm high' 2 (Get-Date) 'exit 0' $t.Text
+    Assert ((SessionTicket) -match 'Stage: blocked' -and (SessionTicket) -match 'blocked after two attempts') 'Two real failures did not block'
+  } finally { Pop-Location }
 }
 Write-Host "$checks checks; $($failures.Count) failures. Fixtures: $root"
 if ($failures) { throw ($failures -join "`n") }

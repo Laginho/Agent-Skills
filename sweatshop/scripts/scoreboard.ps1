@@ -19,13 +19,13 @@ function Median($v) { $s = @($v | Sort-Object); if ($s.Count) { $s[[int][math]::
 # Logs before 2026-10-02 spelled a binding's `claude-opus-5-5`; the driver now logs `opus-5.5`.
 function ModelName($m) { $m -replace '^claude-([a-z]+)-(\d+)-(\d+)\b', '$1-$2.$3' -replace '^claude-', '' }
 
-# Both run-log shapes: 10 cells before Tokens/Cost existed, 12 after. An `api error` row
-# spent no attempt and says nothing about the model: dropped. Ids are keyed by repo,
+# Both run-log shapes: 10 cells before Tokens/Cost existed, 12 after. An `api error` or
+# `timeout` row spent no attempt and says nothing about the model: dropped. Ids are keyed by repo,
 # since two repos can each have a CLEAN-010.
 function Rows($file, $repo) {
   foreach ($l in (Get-Content $file -Encoding UTF8)) {
     $c = @($l -split '\|' | ForEach-Object { $_.Trim() })
-    if ($c.Count -notin 10, 12, 13 -or $c[1] -notmatch '^\d{4}-\d\d-\d\d' -or $c[6] -like 'api error*') { continue }
+    if ($c.Count -notin 10, 12, 13 -or $c[1] -notmatch '^\d{4}-\d\d-\d\d' -or $c[6] -like 'api error*' -or $c[6] -like 'timeout*') { continue }
     [pscustomobject]@{ Key = "$repo/$($c[2])"; Stage = $c[3]; Model = ModelName $c[4]; Outcome = $c[6]
                        Shutdown = $(if ($c.Count -eq 13 -and $c[11] -match '^\d+(\.\d+)?$') { [double]::Parse($c[11], [Globalization.CultureInfo]::InvariantCulture) } else { $null })
                        Min = [int]($c[8] -replace '\D', '')
@@ -161,6 +161,7 @@ if ($SelfCheck) {
     "| 2026-09-27 10:30 | T-1 | review | r high | 1 | merged | $s | 5m | ? | ? |",
     "| 2026-09-27 10:40 | T-2 | implement | b max | 1 | failed (exit 0), will retry | $s | 3m | ? | ? |",
     "| 2026-09-27 10:41 | T-2 | implement | b max | 2 | api error, not counted | $s | 0m | ? | ? |",
+    "| 2026-09-27 10:45 | T-2 | implement | b max | 2 | timeout, not counted | $s | 240m | ? | ? |",
     "| 2026-09-27 10:50 | T-2 | implement | b max | 2 | to-review | $s | 9m | ? | ? |",
     "| 2026-09-27 11:00 | T-2 | review | r high | 2 | review ended at blocked (exit 0) | $s | 5m | ? | ? |",
     "| 2026-09-27 11:10 | T-2 | review | r high | 2 | merged | $s | 5m | ? | ? |",

@@ -212,7 +212,7 @@ not satisfy dependencies. Only then dispatch:
 | Stage | What you do |
 |---|---|
 | `to-implement` | Stage 2. Read `stage2.md` beside this file, then call the `tdd` skill. |
-| `implementing` | A session stopped mid-run. Report what the branch holds and stop — do not continue blind. |
+| `implementing` | A session stopped mid-run, or another one is still on it. Report what the branch holds and stop — do not continue blind. The driver never leaves this for its own retries (below). |
 | `to-review` | Stage 3. Read `stage3.md` beside this file, then call the `code-review` skill. |
 | `reviewing` | Same as `implementing`: report and stop. |
 | `to-merge` | The PR waits on the human (no-session flow only). Report it and stop. |
@@ -223,8 +223,8 @@ Three guards:
 
 - **Reconcile `to-implement` from the base with the committed branch.** The base
   copy may be stale: discover the active branch and read its Stage before
-  dispatch. If that branch itself says `to-implement` after a reopen, stage 2
-  resumes the retained work.
+  dispatch. If that branch itself says `to-implement` after a reopen or a
+  `Driver retry:` note, stage 2 resumes the retained work.
 - **Wrong model, no work.** Inside a session branch (below), skip this guard:
   the driver picked your model, maybe from a lineup given only on its command
   line. Otherwise read every `Models` line of the binding (`Models:`,
@@ -295,8 +295,14 @@ four things:
   it does not review its own work. Stage 3 stops at `done`, `to-merge`,
   `to-implement` or `blocked`, nothing else.
 - **A failed attempt leaves a trace.** The driver writes `Attempt N failed:
-  <reason>` under `## Comments`, committed on the branch. A session that finds
+  <reason>` under `## Comments`, committed on the session. A session that finds
   one is a retry: read it first.
+- **A driver retry resumes.** Before retrying a stage it stopped (a failure, an
+  API error, or its time limit), the driver holds the lane and puts the branch's
+  `implementing` back to `to-implement` (`reviewing` to `to-review`), with a
+  `Driver retry: <why>` note on the branch. That session continues from the
+  branch's commits; read what the last attempt proved before redoing it. Since
+  2026-10-30 a timeout spends no attempt.
 
 Answering is a stage-1 job, done once per batch: read the tree the driver prints
 when it stops — every `blocked` node carries the question under it — then fold

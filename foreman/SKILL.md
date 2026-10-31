@@ -108,6 +108,15 @@ blocked. The existing hard-model escalation remains; changing the model alone
 is not the diagnosis. This diagnosis takes precedence over the generic blocked
 question handling below.
 
+**A timeout park is the foreman's call.** A stage the driver's time limit kills
+(240 min by default since 2026-10-30) spends no attempt and runs again from its
+branch; a second in a row on one ticket parks it with `Stage stopped (timeout)`.
+Read the two stage logs: real progress (a gate still passing tests) means the
+machine is slow, so raise `-ImplementMinutes`/`-ReviewMinutes` at the next
+launch; no output for long stretches means a hang, so fix its cause first. Then
+restore the session's Stage (`to-implement`, or `to-review` after a review); the
+ticket branch already reads it, with its commits kept.
+
 **The 30-minute check-in is a heartbeat**, for the human away from the screen.
 Two sentences in chat, from two sources:
 
@@ -132,7 +141,7 @@ URL): the page the human follows the run on, one card per lane. Write it with
 
     { "session": "<session branch>", "driver": "running|finished|stopped|crashed",
       "current": null | { "id": "", "title": "", "stage": "specify|implement|review",
-                          "model": "", "startedAt": "<ISO, with offset>", "limitMin": 45 },
+                          "model": "", "startedAt": "<ISO, with offset>", "limitMin": 240 },
       "tickets": [ { "id": "", "title": "", "state": "done|running|ready|waiting|blocked|human", "note": "" } ],
       "events": [ { "at": "<ISO>", "text": "" } ],
       "pr": "<github url> or null", "needsHuman": "<what waits on the human> or null",
@@ -167,7 +176,8 @@ checkout/reset: save HEAD under a new recovery ref, stash tracked and untracked
 edits if present, retain the stash ref, and record both. Ignored runtime evidence
 stays in `run-log/`; preserve any needed ignored project output separately.
 
-- `implementing`: preserve the ticket branch under `recovery/<timestamp>/<id>`
+- `implementing` (only a dead driver leaves it; its own retries reset the branch
+  to `to-implement`): preserve the ticket branch under `recovery/<timestamp>/<id>`
   before removing its active name; record that branch in the ticket. The next
   stage inspects saved commits and tests to choose what to reuse, rather than
   continuing blind or discarding the attempt.
