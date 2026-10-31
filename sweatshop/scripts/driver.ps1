@@ -304,11 +304,11 @@ function StageArgs($rt, $model, $effort, $prompt, $title, $final) {
     # rule is not there: name the skill (routing, not behaviour; measured 2026-10-27).
     "run --standalone --auto --format json --model $model --title `"$title`" `"$prompt`""
   } else {
-    # Sandboxed, with escalations judged by Codex's automatic reviewer: the Windows
-    # workspace-write sandbox keeps .git read-only and cannot reach the keyring, so
-    # git and gh fail once and pass on the approved retry (measured 2026-10-02).
+    # No sandbox: on Linux bwrap refused the gate's network and process calls and the
+    # proxy's systemd-run, and on Windows it kept .git read-only (measured 2026-10-02,
+    # 2026-10-30). The runner machine is the boundary.
     $tier = if ($model -match '-fast$') { ' --config service_tier=fast' }
-    "exec --model $($model -replace '-fast$') --config model_reasoning_effort=$effort$tier --approve-for-me --json --output-last-message `"$final`" `"$prompt`""
+    "exec --model $($model -replace '-fast$') --config model_reasoning_effort=$effort$tier --dangerously-bypass-approvals-and-sandbox --json --output-last-message `"$final`" `"$prompt`""
   }
 }
 

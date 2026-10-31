@@ -230,10 +230,10 @@ measured 2026-10-27 was five weeks stale). The cost column is OpenCode's own pri
 per step; subagent sessions are not counted. An unknown model or variant stops the
 run instead of retrying.
 
-Codex stages run with `--approve-for-me`: the workspace-write sandbox, with
-every escalation judged by Codex's automatic reviewer instead of a human. On
-Windows the sandbox keeps `.git` read-only and cannot reach the keyring, so git
-and gh fail once and run on the approved retry.
+Codex stages run with `--dangerously-bypass-approvals-and-sandbox`: no sandbox
+and no approvals, so run the driver only on a machine set aside for the runs.
+The sandbox kept `.git` read-only on Windows, and on Linux it refused the gate's
+network and process calls and the proxy's `systemd-run`.
 
 The repo is the current one when its `AGENTS.md` carries the `## Bindings do
 fluxo` block; otherwise ask which. When asked to run, launch the selected script
