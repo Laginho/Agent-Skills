@@ -1,0 +1,10 @@
+name = "sweatshop-dashboard"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+workers_dev = true
+
+# The write token is a secret: `wrangler secret put WRITE_TOKEN`, never this file.
+[[d1_databases]]
+binding = "DB"
+database_name = "sweatshop-dashboard"
+database_id = "set-by-wrangler-d1-create"
