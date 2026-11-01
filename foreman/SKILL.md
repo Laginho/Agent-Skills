@@ -51,7 +51,13 @@ Claude Code, launch it as a **detached process** with its output in a file:
 On Linux, from Bash (there `Start-Process` pipes the output through the launching
 shell, so it stops when that shell exits); its pid is `pgrep -f '<script> <repo>'`:
 
-    setsid pwsh -NoProfile -File <script> <repo> <flags> > <tracker>/run-log/driver-<when>.out 2> <tracker>/run-log/driver-<when>.out.err < /dev/null &
+    setsid systemd-run --user --scope --collect --unit=sweatshop-driver-<lane>-<when> pwsh -NoProfile -File <script> <repo> <flags> > <tracker>/run-log/driver-<when>.out 2> <tracker>/run-log/driver-<when>.out.err < /dev/null &
+
+The scope is what makes it outlive the session: a host that runs each agent
+session in its own systemd scope (T3 Code does) kills that scope's whole cgroup
+when the session stops, and `setsid` alone does not leave it (measured
+2026-10-31: a `setsid` driver died with its foreman session, five minutes in).
+Check with `cat /proc/<pid>/cgroup`: it must name the driver's own scope.
 
 Not a background Bash/PowerShell task: those die at their `timeout`, 2 h at
 most. The detached driver does not show in the session's task pane;
