@@ -7,4 +7,4 @@ workers_dev = true
 [[d1_databases]]
 binding = "DB"
 database_name = "sweatshop-dashboard"
-database_id = "set-by-wrangler-d1-create"
+database_id = "fefb2406-91e4-44a1-b92e-fef57cd747c8"
