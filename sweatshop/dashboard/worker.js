@@ -6,8 +6,8 @@
 //     tickets: [{ id, title, state, note }], needsHuman: [{ id, title, state, note }],
 //     events: [{ at: '<ISO>', text }], pr: '<url>' | null, costToday: '$1.234' | '≥$1.234',
 //     updatedAt: '<ISO>' }
-// Cloudflare Access guards every path; the driver passes it with a service token and
-// still needs the bearer write token here, so a logged-in reader cannot write.
+// Two secrets: WRITE_TOKEN (the driver's bearer token) and READ_PASSWORD (HTTP Basic for
+// the page and its poll; any user name). Either one unset refuses its side.
 
 const MAX_BODY = 64 * 1024;
 const WEEK = 7 * 24 * 3600e3;
@@ -18,25 +18,34 @@ export default {
   async fetch(req, env) {
     const { pathname } = new URL(req.url);
     if (pathname === '/api/lane' && req.method === 'POST') return write(req, env);
-    if (pathname === '/api/lanes' && req.method === 'GET') {
-      const now = Date.now();
-      const { results } = await env.DB.prepare('SELECT json, receivedAt FROM lanes WHERE receivedAt > ?')
-        .bind(now - WEEK).all();
-      const lanes = results.map(r => ({ ...JSON.parse(r.json), receivedAt: r.receivedAt }));
-      return Response.json({ now, lanes }, { headers: { 'cache-control': 'no-store' } });
+    if (req.method !== 'GET' || (pathname !== '/' && pathname !== '/api/lanes')) return new Response('not found', { status: 404 });
+    if (!readAllowed(req, env)) {
+      return new Response('password required', { status: 401, headers: { 'www-authenticate': 'Basic realm="sweatshop", charset="UTF-8"' } });
     }
-    if (pathname === '/' && req.method === 'GET') {
-      return new Response(PAGE, { headers: { 'content-type': 'text/html; charset=utf-8' } });
-    }
-    return new Response('not found', { status: 404 });
+    if (pathname === '/') return new Response(PAGE, { headers: { 'content-type': 'text/html; charset=utf-8' } });
+    const now = Date.now();
+    const { results } = await env.DB.prepare('SELECT json, receivedAt FROM lanes WHERE receivedAt > ?')
+      .bind(now - WEEK).all();
+    const lanes = results.map(r => ({ ...JSON.parse(r.json), receivedAt: r.receivedAt }));
+    return Response.json({ now, lanes }, { headers: { 'cache-control': 'no-store' } });
   },
 };
 
+function same(a, b) {
+  const enc = new TextEncoder(), x = enc.encode(a), y = enc.encode(b);
+  return x.byteLength === y.byteLength && crypto.subtle.timingSafeEqual(x, y);
+}
+
+function readAllowed(req, env) {
+  const m = /^Basic (.+)$/.exec(req.headers.get('authorization') || '');
+  if (!env.READ_PASSWORD || !m) return false;
+  let pair;
+  try { pair = new TextDecoder().decode(Uint8Array.from(atob(m[1]), c => c.charCodeAt(0))); } catch { return false; }
+  return same(pair.slice(pair.indexOf(':') + 1), env.READ_PASSWORD);
+}
+
 async function write(req, env) {
-  const enc = new TextEncoder();
-  const got = enc.encode(req.headers.get('authorization') || '');
-  const want = enc.encode('Bearer ' + (env.WRITE_TOKEN || ''));
-  if (!env.WRITE_TOKEN || got.byteLength !== want.byteLength || !crypto.subtle.timingSafeEqual(got, want)) {
+  if (!env.WRITE_TOKEN || !same(req.headers.get('authorization') || '', 'Bearer ' + env.WRITE_TOKEN)) {
     return new Response('unauthorized', { status: 401 });
   }
   const body = await req.text();
@@ -184,7 +193,7 @@ async function load() {
     if (!r.ok) throw new Error('HTTP ' + r.status);
     data = await r.json(); error = '';
   } catch (e) {
-    error = 'Cannot reach the dashboard API (' + e.message + '). If the Access login expired, reload the page.';
+    error = 'Cannot reach the dashboard API (' + e.message + '). Reload the page; it asks for the password again if needed.';
   }
   render();
 }
