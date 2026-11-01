@@ -31,6 +31,7 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'ticket-state.ps1') -Repo $Repo
 . (Join-Path $PSScriptRoot 'gate-evidence.ps1') -Repo $Repo
 . (Join-Path $PSScriptRoot 'proxy.ps1') -Repo $Repo
+. (Join-Path $PSScriptRoot 'dashboard.ps1')
 Set-Location $Repo
 $Repo = (Get-Location).Path
 if ($Lane -and -not $SelfCheck -and -not (Test-Path "$Tracker/$Lane/issues")) { throw "Lane '$Lane': no $Tracker/$Lane/issues in $Repo." }
@@ -49,7 +50,7 @@ function GitOk {
   if ($LASTEXITCODE) { throw "git $args`n$(($out | ForEach-Object { "$_" }) -join "`n")" }
   $out | Where-Object { $_ -isnot [Management.Automation.ErrorRecord] } | ForEach-Object { "$_" }
 }
-function Say($m) { Write-Host ("[{0}] {1}" -f (Get-Date -Format HH:mm:ss), $m) }
+function Say($m) { Write-Host ("[{0}] {1}" -f (Get-Date -Format HH:mm:ss), $m); Add-DashEvent $m }
 # Runs in parallel on other repos share this machine. A named mutex dies with its
 # process, so a killed run never leaves one held. $null when $ms runs out.
 function Lock($name, $ms) {
@@ -321,6 +322,8 @@ function RunStage($t, $model, $effort, $minutes, $label) {
   $cliArgs = StageArgs $rt $model $effort $prompt "$($t.Id) $label" "$log.final"
   Say "$($t.Id) $label ($model $effort, ${minutes}m) -> $log"
   if ($DryRun) { Say "$exe $cliArgs"; return 'dry-run' }
+  Report-Dash 'running' ([ordered]@{ id = $t.Id; title = (DashTicket $t).title; stage = $label; model = "$model $effort"
+                                     startedAt = (Get-Date).ToUniversalTime().ToString('o'); limitMin = $minutes })
   $script:LastLog = $log; $script:LastUsage = $null
   $script:LastInfrastructureError = $null
   $script:LastFailureKind = 'infrastructure'
@@ -733,6 +736,7 @@ function LogStage($t, $stage, $model, $attempt, $outcome, $started) {
   try { Add-Content -Encoding UTF8 $RunLog $row }
   catch { $script:LogWriteFailed = $true; Say "Run log unavailable; row saved at $script:LastLog.row.txt. Stopping after this stage: $_" }
   Say "$($t.Id) $stage ($model): $outcome, $cost"
+  Report-Dash
 }
 
 # --- what is left ------------------------------------------------------------------
@@ -816,7 +820,8 @@ function SessionBody {
 }
 # The repo leads the title: with several projects' session PRs in one inbox, a bare
 # `sweatshop: sweatshop/2026-10-29-1430` named no project.
-function SessionTitle($origin, $branch) { (($origin -replace '([\\/]|\.git)+$') -split '[\\/:]')[-1] + ': ' + ($branch -replace '/', ' ') }
+function RepoName($origin) { (($origin -replace '([\\/]|\.git)+$') -split '[\\/:]')[-1] }
+function SessionTitle($origin, $branch) { (RepoName $origin) + ': ' + ($branch -replace '/', ' ') }
 # Opened when the run stops, never earlier: nobody reviews half a session. Body
 # regenerated every time, so a second run on the same session just grows the list.
 function Publish-Session {
@@ -833,6 +838,7 @@ function Publish-Session {
   if ($url) { gh pr edit $url --title $title --body-file $body | Out-Null }
   else { $url = gh pr create --base $Base --head $Loop --title $title --body-file $body }
   if ($LASTEXITCODE) { throw "gh exited $LASTEXITCODE; body kept at $body" }
+  $script:PrUrl = "$url".Trim()
   Say "session PR ($($done.Count) tickets): $url"
 }
 
@@ -1015,6 +1021,22 @@ if ($SelfCheck) {
   $other = & $PowerShellExe -NoProfile -Command "[Threading.Mutex]::new(`$false, 'sweatshop-selfcheck-$PID').WaitOne(0)"
   $l.ReleaseMutex(); $l.Dispose()
   if ("$other" -ne 'False') { throw "Lock: a second process got it ($other)" }
+  # Dashboard: the card's ticket, today's cost, a heartbeat throttled to its interval, and
+  # a post to a closed local port that returns without throwing (never a DNS name: offline).
+  $dt = DashTicket ([pscustomobject]@{ Id = 'APP-7'; Stage = 'blocked'; Text = "# APP-7: Login screen`nStage: blocked"; LastComment = '- 2026-11-01 Proxy escalated: font'; HandoffError = $null })
+  if ("$($dt.id)|$($dt.title)|$($dt.state)|$($dt.note)" -ne 'APP-7|Login screen|blocked|2026-11-01 Proxy escalated: font') { throw "DashTicket: $($dt | ConvertTo-Json -Compress)" }
+  $dt = DashTicket ([pscustomobject]@{ Id = 'APP-8'; Stage = 'to-implement'; Text = "# APP-8 $([char]0x2014) Next"; LastComment = '- x' })
+  if ($dt.title -ne 'Next' -or $dt.note) { throw "DashTicket: $($dt | ConvertTo-Json -Compress)" }
+  $runLog = "| When | ID | Stage | Model | Attempt | Outcome | Session | Took | Tokens | Cost | Shutdown s |`n|---|---|---|---|---|---|---|---|---|---|---|`n| 2026-11-01 10:00 | A-1 | implement | m x | 1 | to-review | s | 5m | 1k in | `$0.500 | ? |`n" +
+            "| 2026-11-01 11:00 | A-1 | review | m x | 1 | merged | s | 5m | ? | ? | ? |`n| 2026-10-31 23:50 | A-0 | review | m x | 1 | merged | s | 5m | 1k in | `$9.000 | 1 |"
+  if ((DashCost $runLog '2026-11-01') -ne ([string][char]0x2265 + '$0.500')) { throw "DashCost: $(DashCost $runLog '2026-11-01')" }
+  if ((DashCost $runLog '2026-10-31') -ne '$9.000' -or $null -ne (DashCost $runLog '2026-11-02')) { throw 'DashCost: other days' }
+  $DashUrl = 'http://127.0.0.1:1'; $DashToken = 'x'; $DashOn = $true
+  $DashSnap = [ordered]@{ project = 'p'; lane = 'l'; events = @(); updatedAt = $null }
+  $DashLastPost = Get-Date; $held = $DashLastPost; DashTick
+  if ($DashLastPost -ne $held) { throw 'DashTick: posted inside its interval' }
+  $DashLastPost = (Get-Date).AddMinutes(-3); $clock = [Diagnostics.Stopwatch]::StartNew(); DashTick 6>$null
+  if (((Get-Date) - $DashLastPost).TotalSeconds -gt 30 -or -not $DashFailing -or $clock.Elapsed.TotalSeconds -gt 8) { throw "Send-Dash: failing=$DashFailing in $($clock.Elapsed.TotalSeconds)s" }
   Write-Host 'Self-check OK'; exit 0
 }
 
@@ -1051,6 +1073,8 @@ elseif (-not (Select-String -Path $RunLog -SimpleMatch $hdr -Quiet)) {
   Add-Content -Encoding UTF8 $RunLog "`n### Schema change`n`n$hdr`n$sep"
 }
 Say "Gate '$Gate', base '$Base', lineup '$LineupName': stage 2 $Model2 $Effort2 ($(RuntimeOf $Model2)), stage 3 $Model3 $Effort3 ($(RuntimeOf $Model3)), hard $(if ($ModelHard) { "$ModelHard $EffortHard ($(RuntimeOf $ModelHard))" } else { 'none: stage 2 for every ticket' })"
+Say "dashboard: $(if ($DashOn) { "reporting to $(([uri]$DashUrl).Host)" } else { 'off' })"
+Report-Dash
 
 try {
 while (-not (StopAsked) -and ($t = NextTicket)) {
@@ -1092,6 +1116,7 @@ while (-not (StopAsked) -and ($t = NextTicket)) {
   if (-not $names[$t.Stage]) { Note $t "Review ended at $($t.Stage) ($res); branch $($t.Branch) holds the review; left for a human" 'blocked' }
 }
 if (-not $DryRun -and -not $script:Stopped) { Say 'Nothing runnable. Done.' }
+} catch { $script:DashCrash = $_.Exception.Message; throw
 } finally {
   # A run that crashed is when you most want the state, so this lives in finally --
   # after Reset-Tree, or the tree would read tickets off whatever branch it died on.
@@ -1100,6 +1125,8 @@ if (-not $DryRun -and -not $script:Stopped) { Say 'Nothing runnable. Done.' }
   if (-not $DryRun) {
     try { Publish-Session } catch { Say "session PR failed: $_" }
     git checkout -q $Base   # Preflight wants the base next time
+    if ($script:DashCrash) { Add-DashEvent "crashed: $script:DashCrash" }
+    Report-Dash $(if ($script:DashCrash) { 'crashed' } elseif ($script:Stopped) { 'stopped' } else { 'finished' })
   }
   ShowSummary
 }

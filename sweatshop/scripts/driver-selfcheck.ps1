@@ -5,6 +5,7 @@ $tokens = $null; $errors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile($source, [ref]$tokens, [ref]$errors)
 if ($errors) { throw "Driver syntax: $errors" }
 . (Join-Path $PSScriptRoot 'stage-runtime.ps1')
+. (Join-Path $PSScriptRoot 'dashboard.ps1')
 $functions = $ast.FindAll({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst]}, $false)
 . ([scriptblock]::Create(($functions | ForEach-Object { $_.Extent.Text }) -join "`n"))
 $prices = $ast.FindAll({param($n) $n -is [Management.Automation.Language.AssignmentStatementAst] -and $n.Left.Extent.Text -eq '$CodexPrices'}, $false)

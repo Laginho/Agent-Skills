@@ -1,5 +1,7 @@
 ﻿# Offline production regressions. Every repository and CLI here is disposable.
 $ErrorActionPreference = 'Stop'
+# The drivers started here must not post to a real dashboard (dashboard.ps1).
+$env:SWEATSHOP_DASH_URL = $null; $env:SWEATSHOP_DASH_TOKEN = $null
 $root = Join-Path ([IO.Path]::GetTempPath()) ('sweatshop-pipeline-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory $root | Out-Null
 $failures = @(); $checks = 0
@@ -22,6 +24,7 @@ foreach ($helper in 'ticket-state.ps1', 'gate-evidence.ps1') {
   if (Test-Path $path) { . ([scriptblock]::Create((LoadFunctions $path))) }
 }
 . (Join-Path $PSScriptRoot 'proxy.ps1')
+. (Join-Path $PSScriptRoot 'dashboard.ps1')   # off: the env vars are cleared above
 $ProxyDir = Join-Path $root 'proxy-receipts'
 # The driver's own test-path pattern, not a copy that could drift from it.
 $tokens = $null; $errors = $null

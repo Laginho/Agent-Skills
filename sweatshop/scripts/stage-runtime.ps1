@@ -32,8 +32,10 @@ function Test-StageCompleted($Text, $Runtime) {
   return $false
 }
 
+# $Tick runs on every poll; it defaults to the caller's $StageTick (the driver's dashboard
+# heartbeat, dashboard.ps1), so proxy.ps1's calls under the driver tick too.
 function Invoke-StageProcess($Exe, $Arguments, $WorkingDirectory, $Log, $Runtime,
-                             [double]$TimeoutSeconds, [double]$GraceSeconds = 10) {
+                             [double]$TimeoutSeconds, [double]$GraceSeconds = 10, [scriptblock]$Tick = $StageTick) {
   $started = [datetime]::UtcNow; $completed = $null; $exited = $null; $owner = $null
   $fault = $null; $result = 'infrastructure'; $code = $null; $forced = $false
   [IO.File]::WriteAllText("$Log.runtime.json", (@{ StartedUtc = $started.ToString('o'); Result = 'running' } | ConvertTo-Json))
@@ -55,6 +57,8 @@ function Invoke-StageProcess($Exe, $Arguments, $WorkingDirectory, $Log, $Runtime
       if (-not $completed -and ($now - $started).TotalSeconds -ge $TimeoutSeconds) {
         $owner.Stop(); $forced = $true; $exited = [datetime]::UtcNow; $result = 'timeout'; break
       }
+      # A tick that throws must not end the stage: the catch below stops the owner.
+      if ($Tick) { try { & $Tick } catch { } }
       Start-Sleep -Milliseconds 250
     } while ($true)
   } catch {

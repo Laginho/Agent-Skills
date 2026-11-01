@@ -1,5 +1,7 @@
 # Local regression tests: no agent, network, user repository, or live app is started.
 $ErrorActionPreference = 'Stop'
+# The driver functions loaded here must not post to a real dashboard (dashboard.ps1).
+$env:SWEATSHOP_DASH_URL = $null; $env:SWEATSHOP_DASH_TOKEN = $null
 . (Join-Path $PSScriptRoot 'stage-runtime.ps1')
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) ('sweatshop-runtime-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory $testRoot | Out-Null
@@ -38,6 +40,11 @@ try {
   Assert ($run.Result -eq 'exit 0' -and -not $run.InfrastructureError) 'Natural process exit failed'
   Start-Sleep -Milliseconds 200
   Assert (-not (Get-Process -Id ([int](Get-Content $pidFile)) -ErrorAction SilentlyContinue)) 'Orphan after natural exit'
+
+  # The tick (the driver's dashboard heartbeat) runs on every poll and never ends a stage, even when it throws.
+  $ticks = [ref]0
+  $run = Invoke-StageProcess $shellExe (Encoded 'Start-Sleep -Seconds 2') $testRoot (Join-Path $testRoot 'tick.txt') 'Codex' 15 -Tick { $ticks.Value++; throw 'tick failed' }
+  Assert ($run.Result -eq 'exit 0' -and -not $run.InfrastructureError -and $ticks.Value -ge 3) "Tick: $($ticks.Value) ticks, $($run | ConvertTo-Json -Compress)"
 
   # A timeout stops the stage's descendants too, not only the CLI.
   Remove-Item $pidFile
@@ -82,6 +89,7 @@ try {
 
   # Load production functions without executing the driver's update, launch, or GitHub paths.
   . ([scriptblock]::Create((Load-Functions (Join-Path $PSScriptRoot 'driver.ps1')) -join "`n"))
+  . (Join-Path $PSScriptRoot 'dashboard.ps1')   # off: the env vars are cleared above
   $Repo = Join-Path $testRoot 'repo'; New-Item -ItemType Directory $Repo | Out-Null
   GitOk -C $Repo init -q
   GitOk -C $Repo config user.email test@example.invalid

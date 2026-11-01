@@ -1,5 +1,7 @@
 ﻿# Complete entry-point tests with local repositories and fake command-line runtimes.
 $ErrorActionPreference = 'Stop'
+# The drivers started here must not post to a real dashboard (dashboard.ps1).
+$env:SWEATSHOP_DASH_URL = $null; $env:SWEATSHOP_DASH_TOKEN = $null
 $root = Join-Path ([IO.Path]::GetTempPath()) ('sweatshop-entry-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory $root | Out-Null
 $ignore = Join-Path $root 'empty.ignore'; [IO.File]::WriteAllText($ignore, '')
