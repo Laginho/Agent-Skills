@@ -176,7 +176,7 @@ function render() {
     var run = ls.filter(function (l) { return stateOf(l) === 'running'; }).length;
     var need = ls.reduce(function (n, l) { return n + needs(l); }, 0);
     var a = el('a', 'project', el('b', null, p),
-      el('span', null, el('span', 'dim', ls.length + ' lanes · '), run + ' running',
+      el('span', null, el('span', 'dim', ls.length + (ls.length === 1 ? ' lane · ' : ' lanes · ')), run + ' running',
          need ? el('span', 'need', ' · ' + need + ' need you') : null,
          bad ? el('span', 'bad', ' · ' + bad + ' down') : null));
     a.href = '#' + encodeURIComponent(p);
@@ -189,7 +189,8 @@ function render() {
 
 async function load() {
   try {
-    var r = await fetch('/api/lanes', { cache: 'no-store' });
+    // The origin, not a relative URL: a page opened as https://user:pass@host cannot fetch a URL with credentials.
+    var r = await fetch(location.origin + '/api/lanes', { cache: 'no-store' });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     data = await r.json(); error = '';
   } catch (e) {
