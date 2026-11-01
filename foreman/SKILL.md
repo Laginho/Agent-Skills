@@ -140,28 +140,6 @@ in, nothing new" is the report. It goes in chat and as a push notification,
 because the human is often away from the screen. The beep stays for trouble
 only.
 
-**Live panel**, when `AGENTS.md` has a `Painel` binding (a claude.ai artifact
-URL): the page the human follows the run on, one card per lane. Write it with
-`ArtifactData`, document `lanes/<lane>`, a whole-document `set` pinned with
-`if_version` to the version you last read:
-
-    { "session": "<session branch>", "driver": "running|finished|stopped|crashed",
-      "current": null | { "id": "", "title": "", "stage": "specify|implement|review",
-                          "model": "", "startedAt": "<ISO, with offset>", "limitMin": 240 },
-      "tickets": [ { "id": "", "title": "", "state": "done|running|ready|waiting|blocked|human", "note": "" } ],
-      "events": [ { "at": "<ISO>", "text": "" } ],
-      "pr": "<github url> or null", "needsHuman": "<what waits on the human> or null",
-      "updatedAt": "<ISO>" }
-
-Write it at launch or adoption, at every finished stage, at every check-in and at
-the end (`driver` finished or crashed, `current` null, `pr` set). A finished
-stage's write also sets `current` to the stage the driver started right after
-it (its newest stage `.txt`), so the card never reads "between stages" while
-one runs; this costs no extra wake. Keep the last 8 events, one short line each.
-At launch, delete the documents of lanes whose `driver` is not `running`: a past
-run's lane would read as this run's. A pinned write that fails: re-read and
-redo. Failing twice: a line in the notes and go on; the panel never stops a run.
-
 ## 3. Crash
 
 The driver's process is gone and its `.out` ends in a `throw` message, or a
