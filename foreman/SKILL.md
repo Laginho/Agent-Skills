@@ -43,15 +43,21 @@ as when it refuses one for billing) goes in chat and the notes before launch,
 and in the summary's **Your turn**: the session PR will merge into a base whose
 remote gate is not running. It does not stop the launch.
 
-Otherwise launch the runtime's driver (the script selected by `sweatshop`). In
-Claude Code, launch it as a **detached process** with its output in a file:
+Otherwise launch the runtime's driver (the script selected by `sweatshop`).
+`SWEATSHOP_FOREMAN` is your tag on the dashboard's lane cards (`sweatshop/SKILL.md`,
+What the driver writes): the name your prompt gives you, else `foreman <lanes>`
+(`foreman a+b`). In Claude Code, launch it as a **detached process** with its
+output in a file:
 
-    Start-Process powershell -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','<script>','<repo>',<flags> -RedirectStandardOutput <tracker>/run-log/driver-<when>.out -RedirectStandardError <tracker>/run-log/driver-<when>.out.err -WindowStyle Hidden -PassThru
+    $env:SWEATSHOP_FOREMAN = '<name>'; Start-Process powershell -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','<script>','<repo>',<flags> -RedirectStandardOutput <tracker>/run-log/driver-<when>.out -RedirectStandardError <tracker>/run-log/driver-<when>.out.err -WindowStyle Hidden -PassThru
 
 On Linux, from Bash (there `Start-Process` pipes the output through the launching
-shell, so it stops when that shell exits); its pid is `pgrep -f '<script> <repo>'`:
+shell, so it stops when that shell exits); its pid is `pgrep -f '<script> <repo>'`.
+The first line loads the dashboard's settings, which a non-interactive shell never
+reads from `~/.bashrc`:
 
-    setsid systemd-run --user --scope --collect --unit=sweatshop-driver-<lane>-<when> pwsh -NoProfile -File <script> <repo> <flags> > <tracker>/run-log/driver-<when>.out 2> <tracker>/run-log/driver-<when>.out.err < /dev/null &
+    [ -f ~/.sweatshop-dashboard.env ] && { set -a; . ~/.sweatshop-dashboard.env; set +a; }
+    SWEATSHOP_FOREMAN='<name>' setsid systemd-run --user --scope --collect --unit=sweatshop-driver-<lane>-<when> pwsh -NoProfile -File <script> <repo> <flags> > <tracker>/run-log/driver-<when>.out 2> <tracker>/run-log/driver-<when>.out.err < /dev/null &
 
 The scope is what makes it outlive the session: a host that runs each agent
 session in its own systemd scope (T3 Code does) kills that scope's whole cgroup

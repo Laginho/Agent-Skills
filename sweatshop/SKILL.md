@@ -116,6 +116,17 @@ model's CLI read-only, prints the answer and the `Proxy decided (<model>)` or
   that table logs `?`, never a guess: add its row from OpenAI's pricing page.
   From 2026-10-20 a Codex stage's cost includes its subagent rollouts, and a
   stage killed by time is priced from its rollout as a lower bound.
+- **The dashboard** (`dashboard/`, a Cloudflare Worker and D1 table): with
+  `SWEATSHOP_DASH_URL` and `SWEATSHOP_DASH_TOKEN` set, the driver posts its
+  lane's snapshot (`dashboard/worker.js` has the shape) at run start, at each
+  stage's start and end and at exit, and re-sends it every 2 minutes while a
+  stage or proxy call runs: the heartbeat. A lane silent for 10 minutes reads
+  `no heartbeat`. Either variable unset turns it off; the run's first lines say
+  `dashboard: off` or `dashboard: reporting to <host>`. A failed post is one
+  console line and never stops the run. `SWEATSHOP_FOREMAN` is the card's tag
+  (unset: `manual`). The Worker holds two secrets, `WRITE_TOKEN` (the driver's)
+  and `READ_PASSWORD` (the page's, HTTP Basic); deploy with `npx wrangler deploy`
+  from `dashboard/`, then `dashboard/smoke.ps1 -ReadPassword <password>`.
 - `<tracker>/run-log/<id>-<stage>-<when>.txt`: the session's full output (for
   Claude, its JSON result). `.final` beside it holds the session's last message.
 - Beside each stage log: `.runtime.json` records start, observed runtime completion,
