@@ -63,8 +63,9 @@ public sealed class SweatshopStageProcess : IDisposable
             foreach (var path in new[] { log, log + ".err" }) new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete).Dispose();
             // Arguments, not ArgumentList: .NET splits this string by the same rules as a Windows command line.
             // setsid keeps the driver's terminal signals off the stage, as CREATE_NO_WINDOW does.
+            // A runaway gate dies inside its own scope instead of starving the desktop session (oomd, 2026-11-01).
             var unit = "sweatshop-stage-" + Guid.NewGuid().ToString("N") + ".scope";
-            var start = new ProcessStartInfo("setsid", "systemd-run --user --scope --quiet --collect --unit=" + unit +
+            var start = new ProcessStartInfo("setsid", "systemd-run --user --scope --quiet --collect -p MemoryMax=6G -p MemorySwapMax=1G --unit=" + unit +
                 " sh -c \"" + Launcher.Replace("\"", "\\\"") + "\" sweatshop-stage \"" + log + "\" " + Process.GetCurrentProcess().Id + " \"" + exe + "\" " + args);
             start.UseShellExecute = false; start.WorkingDirectory = cwd;
             owner.unix = Process.Start(start); owner.Id = owner.unix.Id;
