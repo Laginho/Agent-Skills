@@ -214,7 +214,11 @@ function Field($text, $name) { [regex]::Match($text, "(?m)^\*{0,2}$name\*{0,2}`:
 # Measured 2026-10-24: that shape parked three valid P-Chess handoffs. Only this field
 # takes bullets; a comment bullet such as `- Stage: ...` must not move a ticket. A note is
 # dropped only after `.json`, so `C:\a (x86)\r.json` and `receipt (1)` stay whole paths.
-function GateEvidenceField($text) { [regex]::Match($text, '(?m)^(?:[-*]\s+)?\*{0,2}Gate evidence\*{0,2}:\*{0,2}\s*(.+?)(?:(?<=\.(?i:json))\s+\(.*\))?\s*$').Groups[1].Value }
+# The last receipt is the handoff's: a second stage-2 attempt leaves the first one above it (REV-009, 2026-11-02).
+function GateEvidenceField($text) {
+  $m = [regex]::Matches($text, '(?m)^(?:[-*]\s+)?\*{0,2}Gate evidence\*{0,2}:\*{0,2}\s*(.+?)(?:(?<=\.(?i:json))\s+\(.*\))?\s*$')
+  if ($m.Count) { $m[$m.Count - 1].Groups[1].Value }
+}
 function Ticket($file) {
   $rel = [IO.Path]::GetFullPath($file).Substring($Repo.TrimEnd('\', '/').Length + 1) -replace '\\', '/'
   $text = (GitOk show "${Loop}:$rel") -join "`n"
@@ -877,7 +881,8 @@ if ($SelfCheck) {
   # A bullet receipt with a note parked valid handoffs; a path with parentheses must survive.
   foreach ($case in @(@('Gate evidence: C:\t\r.json', 'C:\t\r.json'), @('- Gate evidence: C:\t\r.json (gate 119/0)', 'C:\t\r.json'),
                       @('* **Gate evidence:** C:\t\r.json', 'C:\t\r.json'), @('Gate evidence: C:\a (x86)\r.json', 'C:\a (x86)\r.json'),
-                      @('- Gate evidence: C:\a (x86)\r.json (gate 119/0 (full))', 'C:\a (x86)\r.json'), @('Gate evidence: C:\t\receipt (1)', 'C:\t\receipt (1)'))) {
+                      @('- Gate evidence: C:\a (x86)\r.json (gate 119/0 (full))', 'C:\a (x86)\r.json'), @('Gate evidence: C:\t\receipt (1)', 'C:\t\receipt (1)'),
+                      @("Gate evidence: C:\t\old.json`n- 2026-11-02 Attempt 1 failed`nGate evidence: C:\t\new.json", 'C:\t\new.json'))) {
     if ((GateEvidenceField "# T-1: x`nStage: to-review`n$($case[0])`n") -ne $case[1]) { throw "GateEvidenceField: $($case[0])" }
   }
   foreach ($case in @(@('https://github.com/Laginho/Agent-Skills.git', 'sweatshop/2026-10-29-1430', 'Agent-Skills: sweatshop 2026-10-29-1430'),
