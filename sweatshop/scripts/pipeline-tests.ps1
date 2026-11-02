@@ -428,6 +428,19 @@ Check 'an asked reopen resumes after the answer: its stale blocked branch is kep
     Assert ((GitOk show "${branch}:pass1.ts") -eq 'previous pass') 'The previous pass was lost'
   } finally { $env:FAKE_PROXY_ANSWER = $null; $script:Asked = $null; Pop-Location }
 }
+Check 'a blocker that is no ticket on the session parks its dependent' {
+  Fixture orphan; Push-Location $Repo
+  try {
+    $origin = Join-Path $root 'orphan-origin.git'; GitOk init -q --bare -b main $origin
+    WriteTicket T-1 to-implement 'T-9, T-2'; WriteTicket T-2 to-implement; WriteTicket T-3 to-implement T-2; StartSession
+    GitOk remote add origin $origin; GitOk push -q -u origin $Loop
+    Park-Orphans
+    $text = Get-Content "$Repo/.scratch/feature/issues/T-1.md" -Raw
+    Assert ($text -match 'Stage: blocked' -and $text -match 'Blocked by T-9, which is no ticket on session sweatshop/test') "Not parked: $text"
+    Assert ((Ticket "$Repo/.scratch/feature/issues/T-3.md").Stage -eq 'to-implement') 'A real blocker parked its dependent'
+    Assert ((GitOk show "origin/${Loop}:.scratch/feature/issues/T-1.md") -match 'Stage: blocked') 'Park not pushed'
+  } finally { Pop-Location }
+}
 # A stage 2 the driver stopped: its branch holds a red test and `implementing`, as on 2026-10-30.
 function StoppedStage($name, $stage = 'implementing', $log = 'gate still running, 954 passed so far. Done?') {
   $origin = Join-Path $root "$name-origin.git"; GitOk init -q --bare -b main $origin
@@ -496,6 +509,25 @@ Check 'a failed attempt the driver retries resumes past implementing; the second
     GitOk checkout -q T-1-work; WriteTicket T-1 implementing; GitOk commit -qam again; GitOk checkout -q $Loop
     Implement-Stopped (Ticket "$Repo/.scratch/feature/issues/T-1.md") 'm high' 2 (Get-Date) 'exit 0' $t.Text
     Assert ((SessionTicket) -match 'Stage: blocked' -and (SessionTicket) -match 'blocked after two attempts') 'Two real failures did not block'
+  } finally { Pop-Location }
+}
+Check 'a review the API cut mid-edit resumes at to-review, edits saved' {
+  Fixture reviewapi; Push-Location $Repo
+  try {
+    $t = @(StoppedStage reviewapi to-review)[-1]
+    $script:Cli = @{ Codex = 'fake' }
+    # The reviewer commits a fix at `reviewing`, starts another edit, and the API drops.
+    function Invoke-StageProcess($exe, $cliArgs, $dir, $log) {
+      GitOk checkout -q T-1-work; WriteTicket T-1 reviewing; GitOk commit -qam 'review fix'
+      [IO.File]::WriteAllText("$Repo/half.ts", 'half'); [IO.File]::WriteAllText($log, 'API Error: 529'); [IO.File]::WriteAllText("$log.err", '')
+      [pscustomobject]@{ Result = 'exit 1'; ExitCode = 1; InfrastructureError = $null; ShutdownSeconds = 0 }
+    }
+    $null = RunStage $t 'gpt-6-luna' 'high' 240 'review'
+    Assert (-not $script:LastInfrastructureError) "Parked as: $script:LastInfrastructureError"
+    Assert ((Get-Content "$RunDir/recovery.txt" -Raw) -match 'refs/sweatshop-recovery/') 'Uncommitted edits not saved'
+    Assert ((Verdict $script:LastLog) -eq 'api-error') 'Not read as an API error'
+    Resume-Branch (Ticket "$Repo/.scratch/feature/issues/T-1.md") 'API error'
+    Assert ((NextTicket).Stage -eq 'to-review') "Retry reads $((NextTicket).Stage)"
   } finally { Pop-Location }
 }
 Write-Host "$checks checks; $($failures.Count) failures. Fixtures: $root"

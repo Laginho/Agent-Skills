@@ -214,7 +214,11 @@ function Field($text, $name) { [regex]::Match($text, "(?m)^\*{0,2}$name\*{0,2}`:
 # Measured 2026-10-24: that shape parked three valid P-Chess handoffs. Only this field
 # takes bullets; a comment bullet such as `- Stage: ...` must not move a ticket. A note is
 # dropped only after `.json`, so `C:\a (x86)\r.json` and `receipt (1)` stay whole paths.
-function GateEvidenceField($text) { [regex]::Match($text, '(?m)^(?:[-*]\s+)?\*{0,2}Gate evidence\*{0,2}:\*{0,2}\s*(.+?)(?:(?<=\.(?i:json))\s+\(.*\))?\s*$').Groups[1].Value }
+# The last receipt is the handoff's: a second stage-2 attempt leaves the first one above it (REV-009, 2026-11-02).
+function GateEvidenceField($text) {
+  $m = [regex]::Matches($text, '(?m)^(?:[-*]\s+)?\*{0,2}Gate evidence\*{0,2}:\*{0,2}\s*(.+?)(?:(?<=\.(?i:json))\s+\(.*\))?\s*$')
+  if ($m.Count) { $m[$m.Count - 1].Groups[1].Value }
+}
 function Ticket($file) {
   $rel = [IO.Path]::GetFullPath($file).Substring($Repo.TrimEnd('\', '/').Length + 1) -replace '\\', '/'
   $text = (GitOk show "${Loop}:$rel") -join "`n"
@@ -289,6 +293,17 @@ function NextTicket {
   if ($r) { return $r }
   $mine | Where-Object { $_.Stage -eq 'to-implement' -and -not ($_.BlockedBy | Where-Object { $_ -notin $done }) } | Select-Object -First 1
 }
+# A blocker that is no ticket on the session never turns done, so its dependent waited unseen.
+# Measured 2026-11-01: REV-007 was blocked by drafts not yet on its session; parked, a human sees it.
+function Park-Orphans {
+  $all = @(AllTickets)
+  foreach ($t in @($all | Where-Object { $_.Stage -eq 'to-implement' -and (InLane $_) })) {
+    $missing = @($t.BlockedBy | Where-Object { $_ -notin $all.Id }) -join ', '
+    if (-not $missing) { continue }
+    Say "$($t.Id): Blocked by $missing, no ticket on $Loop; parked"
+    Note $t "Blocked by $missing, which is no ticket on session $Loop. Publish it on the session or fix the field, then set Stage back to to-implement." 'blocked'
+  }
+}
 
 # --- one fresh CLI session -------------------------------------------------------
 # A ticket stage and the proxy ping run with the same flags, so the ping proves what stages get.
@@ -349,7 +364,10 @@ function RunStage($t, $model, $effort, $minutes, $label) {
     }
     # A stage is handed off by commits, never by a dirty Stage: line or final message.
     # A kill mid-edit is not a handoff: Reset-Tree saves the edits and the stage resumes.
-    if (-not $script:LastInfrastructureError -and $run.Result -ne 'timeout' -and (GitOk status --porcelain)) {
+    $dirty = -not $script:LastInfrastructureError -and $run.Result -ne 'timeout' -and (GitOk status --porcelain)
+    # Nor is an API cut mid-edit: save the edits now, so the retry resumes instead of parking (PR #11).
+    if ($dirty -and (Verdict $log) -eq 'api-error') { Reset-Tree $t; $dirty = $false }
+    if ($dirty) {
       $script:LastFailureKind = 'incomplete handoff'
       $script:LastInfrastructureError = 'Stage left uncommitted work; saved for recovery.'
     }
@@ -835,7 +853,8 @@ function Publish-Session {
   $url = gh pr list --head $Loop --base $Base --state open --json url --jq '.[0].url'
   if ($LASTEXITCODE) { throw "gh pr list exited $LASTEXITCODE" }
   $title = SessionTitle (GitOk remote get-url origin) $Loop
-  if ($url) { gh pr edit $url --title $title --body-file $body | Out-Null }
+  # REST, not `gh pr edit`: on the Linux runner every edit failed and the body went stale (EasyMath, 2026-11-02).
+  if ($url) { gh api --silent -X PATCH "repos/{owner}/{repo}/pulls/$(($url -split '/')[-1])" -f "title=$title" -F "body=@$body" }
   else { $url = gh pr create --base $Base --head $Loop --title $title --body-file $body }
   if ($LASTEXITCODE) { throw "gh exited $LASTEXITCODE; body kept at $body" }
   $script:PrUrl = "$url".Trim()
@@ -877,7 +896,8 @@ if ($SelfCheck) {
   # A bullet receipt with a note parked valid handoffs; a path with parentheses must survive.
   foreach ($case in @(@('Gate evidence: C:\t\r.json', 'C:\t\r.json'), @('- Gate evidence: C:\t\r.json (gate 119/0)', 'C:\t\r.json'),
                       @('* **Gate evidence:** C:\t\r.json', 'C:\t\r.json'), @('Gate evidence: C:\a (x86)\r.json', 'C:\a (x86)\r.json'),
-                      @('- Gate evidence: C:\a (x86)\r.json (gate 119/0 (full))', 'C:\a (x86)\r.json'), @('Gate evidence: C:\t\receipt (1)', 'C:\t\receipt (1)'))) {
+                      @('- Gate evidence: C:\a (x86)\r.json (gate 119/0 (full))', 'C:\a (x86)\r.json'), @('Gate evidence: C:\t\receipt (1)', 'C:\t\receipt (1)'),
+                      @("Gate evidence: C:\t\old.json`n- 2026-11-02 Attempt 1 failed`nGate evidence: C:\t\new.json", 'C:\t\new.json'))) {
     if ((GateEvidenceField "# T-1: x`nStage: to-review`n$($case[0])`n") -ne $case[1]) { throw "GateEvidenceField: $($case[0])" }
   }
   foreach ($case in @(@('https://github.com/Laginho/Agent-Skills.git', 'sweatshop/2026-10-29-1430', 'Agent-Skills: sweatshop 2026-10-29-1430'),
@@ -895,7 +915,9 @@ if ($SelfCheck) {
       $Loop = 'sweatshop/2026-10-29'; $Base = 'main'; Publish-Session
     }
     $verb = if ($existing) { 'edit' } else { 'create' }
-    if ($seen.args[1] -ne $verb -or $seen.args[[array]::IndexOf($seen.args, '--title') + 1] -ne 'Agent-Skills: sweatshop 2026-10-29') { throw "Publish-Session title on ${verb}: $($seen.args)" }
+    $ok = if ($existing) { $seen.args[0] -eq 'api' -and $seen.args -contains 'repos/{owner}/{repo}/pulls/1' -and $seen.args -contains 'title=Agent-Skills: sweatshop 2026-10-29' }
+          else { $seen.args[1] -eq 'create' -and $seen.args[[array]::IndexOf($seen.args, '--title') + 1] -eq 'Agent-Skills: sweatshop 2026-10-29' }
+    if (-not $ok) { throw "Publish-Session title on ${verb}: $($seen.args)" }
   }
   Remove-Item (Join-Path ([IO.Path]::GetTempPath()) "sweatshop-pr-$PID.md") -ErrorAction SilentlyContinue
   # Verdict decides whether an attempt is spent; the shapes are the two real logs of 2026-09-14.
@@ -1077,6 +1099,7 @@ Say "dashboard: $(if ($DashOn) { "reporting to $(([uri]$DashUrl).Host)" } else {
 Report-Dash
 
 try {
+Park-Orphans   # inside the try: its Note pushes, and a failed push must still reach the finally
 while (-not (StopAsked) -and ($t = NextTicket)) {
   $attempt = 1 + ((Get-Content $t.File -Raw -Encoding UTF8) | Select-String -AllMatches 'Attempt \d+ failed').Matches.Count
   if (-not $script:ProxyVia) { Ping-Proxy }
@@ -1104,6 +1127,8 @@ while (-not (StopAsked) -and ($t = NextTicket)) {
   $names = @{ 'done' = 'merged'; 'to-merge' = 'waiting for you'; 'to-implement' = 'reopened' }
   if (-not $names[$t.Stage] -and $res -eq 'timeout') { Stage-TimedOut $t 'review' "$Model3 $Effort3" $attempt $started $ReviewMinutes; continue }
   if (-not $names[$t.Stage] -and (Verdict $script:LastLog) -eq 'api-error') {
+    # Left at `reviewing`, the branch is undispatchable (CONT-146 and CONT-148, 2026-11-02).
+    Resume-Branch $t 'API error'
     LogStage $t 'review' "$Model3 $Effort3"$attempt 'api error, not counted' $started; ApiDown (LogTail $script:LastLog); continue
   }
   $outcome = if ($names[$t.Stage]) { $names[$t.Stage] } else { "review ended at $($t.Stage) ($res)" }

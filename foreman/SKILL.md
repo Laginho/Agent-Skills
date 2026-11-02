@@ -245,8 +245,9 @@ remain pending. Add `Acceptance` and `Disclosure` lines as ticket-flow defines,
 including known deferred defects, links and integration/release impact. Updating
 an older done ticket's comments provides context, not a newly produced ticket.
 Refresh the existing session PR body by incorporating the new disclosures in
-the existing ticket-linked acceptance/decision sections, with `gh pr edit
---body-file`; preserve the completed ticket count and approval lines. Metadata
+the existing ticket-linked acceptance/decision sections, with `gh api -X PATCH
+repos/{owner}/{repo}/pulls/<n> -F body=@<file>` (`gh pr edit` fails on the
+Linux runner); preserve the completed ticket count and approval lines. Metadata
 updates are the exception to section 4's code-edit boundary: switch to the
 session branch, commit only Acceptance/Disclosure and supporting evidence, push
 that branch, then return to the base. The summary and PR carry the same pending acceptance. This is a feature
