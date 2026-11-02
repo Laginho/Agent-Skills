@@ -1109,6 +1109,8 @@ while (-not (StopAsked) -and ($t = NextTicket)) {
   $names = @{ 'done' = 'merged'; 'to-merge' = 'waiting for you'; 'to-implement' = 'reopened' }
   if (-not $names[$t.Stage] -and $res -eq 'timeout') { Stage-TimedOut $t 'review' "$Model3 $Effort3" $attempt $started $ReviewMinutes; continue }
   if (-not $names[$t.Stage] -and (Verdict $script:LastLog) -eq 'api-error') {
+    # Left at `reviewing`, the branch is undispatchable (CONT-146 and CONT-148, 2026-11-02).
+    Resume-Branch $t 'API error'
     LogStage $t 'review' "$Model3 $Effort3"$attempt 'api error, not counted' $started; ApiDown (LogTail $script:LastLog); continue
   }
   $outcome = if ($names[$t.Stage]) { $names[$t.Stage] } else { "review ended at $($t.Stage) ($res)" }
