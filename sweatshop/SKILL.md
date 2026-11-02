@@ -33,7 +33,9 @@ no instructions of its own.** Everything a session does, it does because
 4. **Runs tickets** until nothing is runnable: `to-review` first, then any
    `to-implement` whose `Blocked by` are all `done` — `done` on the session, so
    dependents start on top of what they depend on, no human merge in between.
-   Stage 2 runs on the lineup's `hard` model instead of its `stage 2` one when
+   A `Blocked by` that names no ticket on the session would never turn `done`:
+   before the first stage the driver parks such a ticket `blocked`, naming the
+   missing ID. Stage 2 runs on the lineup's `hard` model instead of its `stage 2` one when
    the ticket says `Difficulty: hard` or carries two `Verdict: Reopen` lines;
    the run log's `Model` column shows which one ran. After the second reopen,
    park that ticket for the foreman's cause diagnosis before another attempt;

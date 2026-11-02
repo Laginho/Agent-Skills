@@ -293,6 +293,17 @@ function NextTicket {
   if ($r) { return $r }
   $mine | Where-Object { $_.Stage -eq 'to-implement' -and -not ($_.BlockedBy | Where-Object { $_ -notin $done }) } | Select-Object -First 1
 }
+# A blocker that is no ticket on the session never turns done, so its dependent waited unseen.
+# Measured 2026-11-01: REV-007 was blocked by drafts not yet on its session; parked, a human sees it.
+function Park-Orphans {
+  $all = @(AllTickets)
+  foreach ($t in @($all | Where-Object { $_.Stage -eq 'to-implement' -and (InLane $_) })) {
+    $missing = @($t.BlockedBy | Where-Object { $_ -notin $all.Id }) -join ', '
+    if (-not $missing) { continue }
+    Say "$($t.Id): Blocked by $missing, no ticket on $Loop; parked"
+    Note $t "Blocked by $missing, which is no ticket on session $Loop. Publish it on the session or fix the field, then set Stage back to to-implement." 'blocked'
+  }
+}
 
 # --- one fresh CLI session -------------------------------------------------------
 # A ticket stage and the proxy ping run with the same flags, so the ping proves what stages get.
@@ -1082,6 +1093,7 @@ elseif (-not (Select-String -Path $RunLog -SimpleMatch $hdr -Quiet)) {
 }
 Say "Gate '$Gate', base '$Base', lineup '$LineupName': stage 2 $Model2 $Effort2 ($(RuntimeOf $Model2)), stage 3 $Model3 $Effort3 ($(RuntimeOf $Model3)), hard $(if ($ModelHard) { "$ModelHard $EffortHard ($(RuntimeOf $ModelHard))" } else { 'none: stage 2 for every ticket' })"
 Say "dashboard: $(if ($DashOn) { "reporting to $(([uri]$DashUrl).Host)" } else { 'off' })"
+Park-Orphans
 Report-Dash
 
 try {

@@ -428,6 +428,19 @@ Check 'an asked reopen resumes after the answer: its stale blocked branch is kep
     Assert ((GitOk show "${branch}:pass1.ts") -eq 'previous pass') 'The previous pass was lost'
   } finally { $env:FAKE_PROXY_ANSWER = $null; $script:Asked = $null; Pop-Location }
 }
+Check 'a blocker that is no ticket on the session parks its dependent' {
+  Fixture orphan; Push-Location $Repo
+  try {
+    $origin = Join-Path $root 'orphan-origin.git'; GitOk init -q --bare -b main $origin
+    WriteTicket T-1 to-implement 'T-9, T-2'; WriteTicket T-2 to-implement; WriteTicket T-3 to-implement T-2; StartSession
+    GitOk remote add origin $origin; GitOk push -q -u origin $Loop
+    Park-Orphans
+    $text = Get-Content "$Repo/.scratch/feature/issues/T-1.md" -Raw
+    Assert ($text -match 'Stage: blocked' -and $text -match 'Blocked by T-9, which is no ticket on session sweatshop/test') "Not parked: $text"
+    Assert ((Ticket "$Repo/.scratch/feature/issues/T-3.md").Stage -eq 'to-implement') 'A real blocker parked its dependent'
+    Assert ((GitOk show "origin/${Loop}:.scratch/feature/issues/T-1.md") -match 'Stage: blocked') 'Park not pushed'
+  } finally { Pop-Location }
+}
 # A stage 2 the driver stopped: its branch holds a red test and `implementing`, as on 2026-10-30.
 function StoppedStage($name, $stage = 'implementing', $log = 'gate still running, 954 passed so far. Done?') {
   $origin = Join-Path $root "$name-origin.git"; GitOk init -q --bare -b main $origin
