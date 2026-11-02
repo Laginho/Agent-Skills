@@ -279,7 +279,8 @@ parallel runs are lanes.
 takes only that folder's tickets, on its own session `sweatshop/<folder>/<stamp>`
 with its own PR. Blockers count as `done` from any folder, but only on the lane's
 session: a ticket blocked by another lane's ticket waits until that lane's PR is
-merged and this lane starts a new session.
+merged and this lane starts a new session. A blocker that is not on this lane's
+session at all (published after it opened) parks the ticket `blocked` instead (4.).
 
 - **One clone per lane**, of the same origin, made once and reused, in an ignored
   folder inside the repo, plus whatever the gate needs installed. For EasyMath:
