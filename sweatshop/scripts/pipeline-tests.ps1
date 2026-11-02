@@ -511,5 +511,24 @@ Check 'a failed attempt the driver retries resumes past implementing; the second
     Assert ((SessionTicket) -match 'Stage: blocked' -and (SessionTicket) -match 'blocked after two attempts') 'Two real failures did not block'
   } finally { Pop-Location }
 }
+Check 'a review the API cut mid-edit resumes at to-review, edits saved' {
+  Fixture reviewapi; Push-Location $Repo
+  try {
+    $t = @(StoppedStage reviewapi to-review)[-1]
+    $script:Cli = @{ Codex = 'fake' }
+    # The reviewer commits a fix at `reviewing`, starts another edit, and the API drops.
+    function Invoke-StageProcess($exe, $cliArgs, $dir, $log) {
+      GitOk checkout -q T-1-work; WriteTicket T-1 reviewing; GitOk commit -qam 'review fix'
+      [IO.File]::WriteAllText("$Repo/half.ts", 'half'); [IO.File]::WriteAllText($log, 'API Error: 529'); [IO.File]::WriteAllText("$log.err", '')
+      [pscustomobject]@{ Result = 'exit 1'; ExitCode = 1; InfrastructureError = $null; ShutdownSeconds = 0 }
+    }
+    $null = RunStage $t 'gpt-6-luna' 'high' 240 'review'
+    Assert (-not $script:LastInfrastructureError) "Parked as: $script:LastInfrastructureError"
+    Assert ((Get-Content "$RunDir/recovery.txt" -Raw) -match 'refs/sweatshop-recovery/') 'Uncommitted edits not saved'
+    Assert ((Verdict $script:LastLog) -eq 'api-error') 'Not read as an API error'
+    Resume-Branch (Ticket "$Repo/.scratch/feature/issues/T-1.md") 'API error'
+    Assert ((NextTicket).Stage -eq 'to-review') "Retry reads $((NextTicket).Stage)"
+  } finally { Pop-Location }
+}
 Write-Host "$checks checks; $($failures.Count) failures. Fixtures: $root"
 if ($failures) { throw ($failures -join "`n") }

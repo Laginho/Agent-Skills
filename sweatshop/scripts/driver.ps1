@@ -364,7 +364,10 @@ function RunStage($t, $model, $effort, $minutes, $label) {
     }
     # A stage is handed off by commits, never by a dirty Stage: line or final message.
     # A kill mid-edit is not a handoff: Reset-Tree saves the edits and the stage resumes.
-    if (-not $script:LastInfrastructureError -and $run.Result -ne 'timeout' -and (GitOk status --porcelain)) {
+    $dirty = -not $script:LastInfrastructureError -and $run.Result -ne 'timeout' -and (GitOk status --porcelain)
+    # Nor is an API cut mid-edit: save the edits now, so the retry resumes instead of parking (PR #11).
+    if ($dirty -and (Verdict $log) -eq 'api-error') { Reset-Tree $t; $dirty = $false }
+    if ($dirty) {
       $script:LastFailureKind = 'incomplete handoff'
       $script:LastInfrastructureError = 'Stage left uncommitted work; saved for recovery.'
     }
@@ -1093,10 +1096,10 @@ elseif (-not (Select-String -Path $RunLog -SimpleMatch $hdr -Quiet)) {
 }
 Say "Gate '$Gate', base '$Base', lineup '$LineupName': stage 2 $Model2 $Effort2 ($(RuntimeOf $Model2)), stage 3 $Model3 $Effort3 ($(RuntimeOf $Model3)), hard $(if ($ModelHard) { "$ModelHard $EffortHard ($(RuntimeOf $ModelHard))" } else { 'none: stage 2 for every ticket' })"
 Say "dashboard: $(if ($DashOn) { "reporting to $(([uri]$DashUrl).Host)" } else { 'off' })"
-Park-Orphans
 Report-Dash
 
 try {
+Park-Orphans   # inside the try: its Note pushes, and a failed push must still reach the finally
 while (-not (StopAsked) -and ($t = NextTicket)) {
   $attempt = 1 + ((Get-Content $t.File -Raw -Encoding UTF8) | Select-String -AllMatches 'Attempt \d+ failed').Matches.Count
   if (-not $script:ProxyVia) { Ping-Proxy }
