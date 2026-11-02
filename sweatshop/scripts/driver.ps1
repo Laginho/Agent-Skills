@@ -839,7 +839,8 @@ function Publish-Session {
   $url = gh pr list --head $Loop --base $Base --state open --json url --jq '.[0].url'
   if ($LASTEXITCODE) { throw "gh pr list exited $LASTEXITCODE" }
   $title = SessionTitle (GitOk remote get-url origin) $Loop
-  if ($url) { gh pr edit $url --title $title --body-file $body | Out-Null }
+  # REST, not `gh pr edit`: on the Linux runner every edit failed and the body went stale (EasyMath, 2026-11-02).
+  if ($url) { gh api --silent -X PATCH "repos/{owner}/{repo}/pulls/$(($url -split '/')[-1])" -f "title=$title" -F "body=@$body" }
   else { $url = gh pr create --base $Base --head $Loop --title $title --body-file $body }
   if ($LASTEXITCODE) { throw "gh exited $LASTEXITCODE; body kept at $body" }
   $script:PrUrl = "$url".Trim()
@@ -900,7 +901,9 @@ if ($SelfCheck) {
       $Loop = 'sweatshop/2026-10-29'; $Base = 'main'; Publish-Session
     }
     $verb = if ($existing) { 'edit' } else { 'create' }
-    if ($seen.args[1] -ne $verb -or $seen.args[[array]::IndexOf($seen.args, '--title') + 1] -ne 'Agent-Skills: sweatshop 2026-10-29') { throw "Publish-Session title on ${verb}: $($seen.args)" }
+    $ok = if ($existing) { $seen.args[0] -eq 'api' -and $seen.args -contains 'repos/{owner}/{repo}/pulls/1' -and $seen.args -contains 'title=Agent-Skills: sweatshop 2026-10-29' }
+          else { $seen.args[1] -eq 'create' -and $seen.args[[array]::IndexOf($seen.args, '--title') + 1] -eq 'Agent-Skills: sweatshop 2026-10-29' }
+    if (-not $ok) { throw "Publish-Session title on ${verb}: $($seen.args)" }
   }
   Remove-Item (Join-Path ([IO.Path]::GetTempPath()) "sweatshop-pr-$PID.md") -ErrorAction SilentlyContinue
   # Verdict decides whether an attempt is spent; the shapes are the two real logs of 2026-09-14.
