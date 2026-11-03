@@ -98,12 +98,30 @@ in chat, not a file.
    recently touched feature is fully closed, the active feature is the first one in
    dependency order with open tickets.
 
+7. **Overview sources.** For the overview block (see Output): the merged PRs of the
+   last ~7 days (`git log --since=<7 days ago> --merges --format='%ad %s'
+   --date=short <base>`) say which features moved; the first lines of each moved or
+   active feature's `spec.md` say what that feature is; for open tickets, the title
+   and the "why it is parked" section (whatever the repo calls it) say what is left
+   and why it waits. Read only those parts, not the whole spec.
+
 Never read closed tickets' bodies for the brief; they are history, not state.
 
 ## Output
 
-Portuguese if the repo's docs are in Portuguese, otherwise English. Five short blocks,
-plain prose or one-line bullets, no headers wider than this:
+Portuguese if the repo's docs are in Portuguese, otherwise English. An overview, then
+five short blocks, plain prose or one-line bullets, no headers wider than this:
+
+**Overview** — the project-level picture for a reader who does not track ticket IDs.
+Write it in plain prose with no ticket IDs or hashes. Name features, units and parts
+of the product the way the repo's docs do. Cover four things in 4–8 lines:
+- what moved in the last week, in terms of what the product can now do;
+- whether anything is running now;
+- what is left to close the current milestone (unit, feature, phase), in order;
+- what is parked on purpose, why, and what would bring it back (a decision, a
+  threshold, a review).
+End with what comes after the milestone. Every claim here has to come from the same
+facts as the blocks below; it is a different view, not a different source.
 
 **Done** — the last 2–3 closed tickets or ledger entries, feature-level, with IDs and
 dates. Tickets only: no commit hashes, and never lead with tracker migrations, header
@@ -136,12 +154,13 @@ order, with its path. If nothing is open: say the tracker is empty and offer thr
 concrete options (code audit, bug hunt against a named area, new feature from the
 spec) — do not invent tickets.
 
-Under 30 lines total. No preamble, no restating the layout.
+Under 40 lines total, overview included. No preamble, no restating the layout.
 
 ## When the repo does not follow the layout
 
 If there is no `.scratch/` and project instructions name no tracker: report the last
-5 commits and the dirty tree, then say in one line that there is no issue tracker to
+5 commits and the dirty tree (the overview becomes one line on what those commits
+did), then say in one line that there is no issue tracker to
 read and point at the `.scratch/<feature>/issues/` one-file-per-ticket convention. Do not guess
 next steps from diffs.
 
