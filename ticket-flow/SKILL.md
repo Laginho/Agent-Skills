@@ -367,6 +367,7 @@ work. Do not copy this skill into the repo — one copy of the standard is the p
     - Base branch: `<name>`
     - Test files: `<regex>`
     - Sync gate: `<command>` (optional: a fuller gate the foreman runs once per session, at the sync)
+    - PR gate: `<command>` (optional: a fuller gate `pr-review-loop` runs once per PR, before approval)
 
 Models are not a repo binding. The lineups are global, in `sweatshop/lineups.md`
 (one copy for every repo, so none goes stale), and the driver refuses a `Models`

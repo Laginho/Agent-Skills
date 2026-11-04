@@ -9,8 +9,10 @@ Two entry points. **Fan-out** (the human names several PRs or "the open PRs"): r
 section 1 in this session. **One PR** (a PR number and a worktree, usually handed down
 by a fan-out): run section 2 and nothing else.
 
-Read from the repo's `AGENTS.md` bindings, never guess: `Gate:`, `Base branch:`,
-`Worktrees:`. The reviewer is the model the human names; else the **stage 3 model of
+Read from the repo's `AGENTS.md` bindings, never guess: `PR gate:` (else `Gate:`),
+`Base branch:`, `Worktrees:`. "The gate" below is that command. A `PR gate:` is the
+fuller gate a repo runs only here, once per PR, so tests the ticket gate skips still
+run before approval. The reviewer is the model the human names; else the **stage 3 model of
 the default lineup** in the global `~/.claude/skills/sweatshop/lineups.md`
 (`Models (default)` names the lineup; its `stage 3` entry is model and effort).
 Pass the reviewer to `delegate_task` as a target with `options` (for Codex,
@@ -47,7 +49,8 @@ worktree. Commit messages cite the PR (`(PR #<N>)`).
 `origin/<base>`, merge it in, so the gate covers what the merge will produce.
 Conflicts in append-only records (run logs, interventions, attribution): keep both
 sides' entries in order. Missing dependencies: install them (`npm --prefix app ci`).
-Gate the merge before the first push.
+Gate the head (the merge, if there was one) before round 1, even when nothing was
+merged: the PR gate covers tests no earlier gate ran. Red is a finding: fix it.
 
 **Round k.** New `delegate_task` per round, reviewer target from the bindings,
 `clientRequestId` `pr-<N>-review-r<k>`, `mode: "wait"`, `timeoutMs: 3600000`. On
@@ -75,7 +78,7 @@ Gate the merge before the first push.
 - Taste or product calls (visual, tone, app scope): record and leave for the human.
   Pedagogy of draft content is the agents' call, grounded in the spec.
 
-**Gate** after any change, through the lock (section 3). Green → `git push origin <head>`. Red on a
+**Gate** after any change, through the lock (section 3), with the same binding. Green → `git push origin <head>`. Red on a
 single timeout: rerun that test file alone; passing alone is load, so record it and go
 on. Any other red: fix it.
 
@@ -84,8 +87,8 @@ reads: prose docs (`docs/`, `*.md`) and the tracker (`.scratch/`). Push right aw
 note "gate skipped: docs only" in the report. A test that loads a doc file, or any code,
 config or fixture in the change: gate it.
 
-**Stop** when the reviewer answers `VERDICT: APPROVED` with no P0–P2 open **for the
-current HEAD**: a commit after the approval (even a P3 fix) needs one more round. Also
+**Stop** when the reviewer answers `VERDICT: APPROVED` with no P0–P2 open and the
+last gate is green (or skipped as docs only) **for the current HEAD**: a commit after the approval (even a P3 fix) needs one more round. Also
 stop when the same finding stays disputed for 3 rounds: report the disagreement.
 
 **Report** to the parent, in the human's language: rounds; every finding with
@@ -103,7 +106,7 @@ machine-wide slots while the gate runs and writes `WAIT`, `START`, the output, t
 The session dies when its turn ends, and a background task finishing does not wake it.
 So: start the gate with Bash `run_in_background` (`timeout: 7200000`):
 
-    powershell -NoProfile -File "<skill dir>\scripts\gate-lock.ps1" -Repo "<worktree>" -Log "<log outside the repo>" -Command "<Gate: binding>"
+    powershell -NoProfile -File "<skill dir>\scripts\gate-lock.ps1" -Repo "<worktree>" -Log "<log outside the repo>" -Command "<PR gate: binding, else Gate:>"
 
 (On Linux or macOS: `pwsh` instead of `powershell`, and `/` in the path.)
 
