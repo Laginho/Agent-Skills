@@ -40,6 +40,9 @@ no instructions of its own.** Everything a session does, it does because
    the run log's `Model` column shows which one ran. After the second reopen,
    park that ticket for the foreman's cause diagnosis before another attempt;
    other runnable tickets continue. The reviewer never changes.
+   A stage 2 that commits `to-implement` with a grown `Progresso: <k> de <M>`
+   (`ticket-flow`, partial handoff) logs `progress k/M`, spends no attempt, and
+   the next stage 2 resumes the branch.
 5. **Stops and reports.** Prints the open tree, then pushes the session and
    opens its PR against the base — or updates the body if the PR exists — and
    returns to the base branch.

@@ -223,8 +223,9 @@ Three guards:
 
 - **Reconcile `to-implement` from the base with the committed branch.** The base
   copy may be stale: discover the active branch and read its Stage before
-  dispatch. If that branch itself says `to-implement` after a reopen or a
-  `Driver retry:` note, stage 2 resumes the retained work.
+  dispatch. If that branch itself says `to-implement` after a reopen, a
+  `Driver retry:` note or a `Progresso:` line (partial handoff, below), stage 2
+  resumes the retained work.
 - **Wrong model, no work.** Inside a session branch (below), skip this guard:
   the driver picked your model, maybe from a lineup given only on its command
   line. Otherwise read every `Models (<lineup>):` line of the global
@@ -303,6 +304,15 @@ four things:
   `Driver retry: <why>` note on the branch. That session continues from the
   branch's commits; read what the last attempt proved before redoing it. Since
   2026-10-30 a timeout spends no attempt.
+- **A ticket split into parts hands off one part per stage 2.** Only when the
+  ticket says so (a repo rule such as one chapter per stage for a review that
+  repairs several chapters): each stage does one part, gates it, commits it with
+  `Progresso: capítulo <k> de <M>` on its own line of the ticket and `Stage:
+  to-implement`, and stops. The next stage 2 resumes the branch at part k+1; the
+  part that reaches M commits `to-review` instead, and stage 3 reviews every
+  part at once. The driver counts a grown `Progresso:` as progress, not a failed
+  attempt (`progress k/M` in the run log); no new part, or no growth, is a
+  failure as before.
 
 Answering is a stage-1 job, done once per batch: read the tree the driver prints
 when it stops — every `blocked` node carries the question under it — then fold

@@ -662,6 +662,23 @@ function Stage-TimedOut($t, $stage, $model, $attempt, $started, $minutes) {
   Note $t "Stage stopped (timeout): two $stage attempts in a row hit the $minutes-minute limit; no attempt spent. Foreman: if $script:LastLog shows real progress, raise the limit; if it shows a hang, fix the cause. Then set this Stage back to resume from branch $($t.Branch)." 'blocked'
 }
 
+# A stage 2 split into parts (one chapter per stage, EasyMath CLEAN-088) hands back
+# `to-implement` with a `Progresso: capítulo <k> de <M>` line read off the ticket's branch,
+# so committed there. It is progress only when k grew, M held and k < M (the last part goes
+# to `to-review`): at most M-1 such stages, plus the two attempts of a failure.
+function Progress($before, $after, $stage) {
+  if ($stage -ne 'to-implement') { return }
+  $re = '(?im)^\*{0,2}Progress(?:o)?\*{0,2}:\*{0,2}\D*?(\d+)\s+(?:de|of)\s+(\d+)'
+  $a = [regex]::Matches($after, $re) | Select-Object -Last 1
+  if (-not $a) { return }
+  $k, $m = [int]$a.Groups[1].Value, [int]$a.Groups[2].Value
+  $b = [regex]::Matches($before, $re) | Select-Object -Last 1
+  $k0 = if ($b) { [int]$b.Groups[1].Value } else { 0 }
+  if ($b -and [int]$b.Groups[2].Value -ne $m) { return }
+  if ($k -le $k0 -or $k -ge $m) { return }
+  "$k/$m"
+}
+
 # Stage 2 ended short of `to-review`. Only a real failure spends one of the two attempts.
 function Implement-Stopped($t, $impl, $attempt, $started, $res, $before) {
   $tail = LogTail $script:LastLog
@@ -920,6 +937,23 @@ if ($SelfCheck) {
     if (-not $ok) { throw "Publish-Session title on ${verb}: $($seen.args)" }
   }
   Remove-Item (Join-Path ([IO.Path]::GetTempPath()) "sweatshop-pr-$PID.md") -ErrorAction SilentlyContinue
+  # A stage 2 split by chapter hands back `to-implement` with a committed `Progresso:` line
+  # that grew (EasyMath CLEAN-088, 2026-11-04); anything else short of `to-review` is a failure.
+  foreach ($case in @(@("Stage: to-implement`
+Progresso: capítulo 1 de 3", "Stage: to-implement`
+Progresso: capítulo 2 de 3", 'to-implement', '2/3'),
+                      @("Stage: to-implement", "Stage: to-implement`
+Progress: chapter 1 of 3", 'to-implement', '1/3'),
+                      @("Progresso: capítulo 2 de 3", "Progresso: capítulo 2 de 3", 'to-implement', $null),
+                      @("Progresso: capítulo 2 de 3", "Progresso: capítulo 1 de 3", 'to-implement', $null),
+                      @("Progresso: capítulo 2 de 3", "Progresso: capítulo 3 de 3", 'to-implement', $null),
+                      @("Progresso: capítulo 1 de 3", "Progresso: capítulo 2 de 4", 'to-implement', $null),
+                      @("Progresso: capítulo 1 de 3", "Progresso: capítulo 2 de 3", 'blocked', $null),
+                      @("x", "y", 'to-implement', $null))) {
+    $got = Progress $case[0] $case[1] $case[2]
+    if ($got -ne $case[3]) { throw "Progress: $($case[1] -replace "`
+", ' / ') at $($case[2]) expected '$($case[3])', got '$got'" }
+  }
   # Verdict decides whether an attempt is spent; the shapes are the two real logs of 2026-09-14.
   $tmp = Join-Path ([IO.Path]::GetTempPath()) "sweatshop-verdict-$PID.txt"
   foreach ($case in @(@("API Error: Unable to connect to API (ENOTFOUND)`n", 'api-error'),
@@ -1113,7 +1147,13 @@ while (-not (StopAsked) -and ($t = NextTicket)) {
     if ($DryRun) { break }
     if (Park-Infrastructure $t 'implement' $impl $attempt $started) { continue }
     $t = Ticket (Join-Path $Repo $t.File)
-    if ($t.Stage -ne 'to-review') { Implement-Stopped $t $impl $attempt $started $res $before; continue }
+    if ($t.Stage -ne 'to-review') {
+      if ($p = Progress $before $t.Text $t.Stage) {
+        Reset-Tree $t; LogStage $t 'implement' $impl $attempt "progress $p" $started
+        if (StopAsked) { break }; continue
+      }
+      Implement-Stopped $t $impl $attempt $started $res $before; continue
+    }
     LogStage $t 'implement' $impl $attempt 'to-review' $started
     if (StopAsked) { break }
   }
