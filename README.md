@@ -1,6 +1,6 @@
 # Agent Skills
 
-Eight skills for coding agents. Provider-agnostic: a skill is a folder with a
+Nine skills for coding agents. Provider-agnostic: a skill is a folder with a
 `SKILL.md` inside, which is all any tool needs.
 
 | Skill | What it does |
@@ -13,8 +13,9 @@ Eight skills for coding agents. Provider-agnostic: a skill is a folder with a
 | [`taskmaster`](taskmaster/SKILL.md) | Runs several `sweatshop` lanes through their foremen, one per one or two lanes: relays syncs when a lane's PR merges and ends with one digest across lanes. |
 | [`sweatshop`](sweatshop/SKILL.md) | The unattended driver for `ticket-flow`: launches fresh Claude Code, Codex or OpenCode CLI sessions, one stage at a time, each on the runtime its lineup model belongs to, collect merged tickets on one `sweatshop/*` branch, and open a single PR. |
 | [`grill-proxy`](grill-proxy/SKILL.md) | Grilling where the proxy (`sweatshop/scripts/proxy.ps1`) answers the routine questions of each round and only design, taste and irreversible calls reach the human. Wraps the vendored `grilling` skill; `ticket-flow` stage 1 uses it. |
+| [`pr-review-loop`](pr-review-loop/SKILL.md) | Reviews open PRs until approved: one session per PR, a fresh reviewer each round, every finding fixed or refuted, the gate run through a machine-wide lock (`pr-review-loop/scripts/gate-lock.ps1`). Never merges. |
 
-All are user-invoked (`/audit`, `/standup`, `/ticket-flow` or a bare ticket id, `/sweatshop`, `/foreman`, `/scout`, `/taskmaster`, `/grill-proxy`), never fired automatically — except `grill-proxy`, which `ticket-flow` stage 1 also calls.
+All are user-invoked (`/audit`, `/standup`, `/ticket-flow` or a bare ticket id, `/sweatshop`, `/foreman`, `/scout`, `/taskmaster`, `/grill-proxy`, `/pr-review-loop`), never fired automatically — except `grill-proxy`, which `ticket-flow` stage 1 also calls, and `pr-review-loop`, which also answers asks like "review the open PRs until approved".
 
 ## Install
 
@@ -34,7 +35,8 @@ every `SKILL.md` in full and confirm each one still matches this description:
 
 - no scripts, no network calls, no reading credentials or environment tokens —
   except `sweatshop`, whose scripts are under `sweatshop/scripts/`:
-  they run `git`, `gh`, and the invoking agent's CLI
+  they run `git`, `gh`, and the invoking agent's CLI; and `pr-review-loop/scripts/gate-lock.ps1`, which
+  only runs the repo's gate command under a machine-wide lock
 - no `allowed-tools` in the frontmatter (that grants tools without asking)
 - writes limited to what the table above says — `audit` writes its report,
   `standup` writes nothing
