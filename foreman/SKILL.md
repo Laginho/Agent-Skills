@@ -507,7 +507,12 @@ another lane merged. Never while a driver runs on the clone. In the clone:
    line, else `Gate:`. A `Sync gate:` covers tests the ticket gate skips, so at
    the end of a lane run it runs even when the merge brought nothing (step 2
    says "Already up to date"): run it on the session head, with the same
-   handling. Red: `git merge --abort` and a
+   handling. With only `Gate:` (no `Sync gate:`), skip it when the merge
+   brought nothing or touches only files no test reads (prose docs `docs/`,
+   `*.md`, and the tracker `.scratch/`; a test that loads one of them means
+   gate it), as in `pr-review-loop`: the PR gate runs before approval. Note
+   `sync gate skipped: <reason>` in step 5's comment; with nothing merged
+   there is nothing to commit. Red: `git merge --abort` and a
    **Your turn** line with the failing test and both tickets; a fix is new code,
    which goes in a ticket, never in the sync. Green: commit
    `Merge <base> into <session>` and push the session branch.
