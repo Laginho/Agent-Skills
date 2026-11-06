@@ -126,7 +126,8 @@ model's CLI read-only, prints the answer and the `Proxy decided (<model>)` or
   lane's snapshot (`dashboard/worker.js` has the shape) at run start, at each
   stage's start and end and at exit, and re-sends it every 2 minutes while a
   stage or proxy call runs: the heartbeat. A lane silent for 10 minutes reads
-  `no heartbeat`. Either variable unset turns it off; the run's first lines say
+  `no heartbeat`. The page shows only the current run: running lanes and crashed
+  ones; a finished or stopped lane drops off. Either variable unset turns it off; the run's first lines say
   `dashboard: off` or `dashboard: reporting to <host>`. A failed post is one
   console line and never stops the run. `SWEATSHOP_FOREMAN` is the card's tag
   (unset: `manual`). The Worker holds two secrets, `WRITE_TOKEN` (the driver's)

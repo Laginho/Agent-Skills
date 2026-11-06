@@ -26,7 +26,9 @@ export default {
     const now = Date.now();
     const { results } = await env.DB.prepare('SELECT json, receivedAt FROM lanes WHERE receivedAt > ?')
       .bind(now - WEEK).all();
-    const lanes = results.map(r => ({ ...JSON.parse(r.json), receivedAt: r.receivedAt }));
+    // Only the current run: a running driver (live or silent) or a crash still to look at.
+    const lanes = results.map(r => ({ ...JSON.parse(r.json), receivedAt: r.receivedAt }))
+      .filter(l => l.driver === 'running' || l.driver === 'crashed');
     return Response.json({ now, lanes }, { headers: { 'cache-control': 'no-store' } });
   },
 };
@@ -183,7 +185,7 @@ function render() {
     list.append(a);
   });
   app.append(el('h1', null, 'Sweatshop'), summary(data.lanes),
-             data.lanes.length ? list : el('p', 'dim', 'No lanes reported in the last 7 days.'));
+             data.lanes.length ? list : el('p', 'dim', 'No lane running.'));
   document.title = 'Sweatshop';
 }
 
