@@ -32,6 +32,14 @@ function DashTicket($t) {
   [ordered]@{ id = $t.Id; title = $title; state = $t.Stage; note = Clip $note 300 }
 }
 
+# Waiting on a human, not on work: a `blocked` ticket whose blockers are not all done is a
+# dependency wait (a human ticket queued behind agent work), so it stays off "Needs you".
+function DashNeedsHuman($tickets, $all) {
+  $doneIds = @($all | Where-Object Stage -eq 'done' | ForEach-Object Id)
+  $waiting = @($all | Where-Object { $_.Stage -eq 'blocked' -and ($_.BlockedBy | Where-Object { $_ -notin $doneIds }) } | ForEach-Object Id)
+  @($tickets | Where-Object { $_.state -in $DashHuman -and $_.id -notin $waiting })
+}
+
 # Today's spend: the priced Cost cells of today's run-log rows (local date, as the rows are),
 # prefixed with U+2265 (>=) when a row of today is `?`. $null when nothing ran today.
 function DashCost($logText, $today) {
@@ -53,16 +61,19 @@ function Report-Dash($driver = 'running', $current = $null) {
   if (-not $DashOn) { return }
   if (-not $script:DashProject) { $script:DashProject = try { RepoName (GitOk remote get-url origin) } catch { Split-Path $Repo -Leaf } }
   $tickets = if ($script:DashSnap) { $script:DashSnap.tickets }
+  $needs = if ($script:DashSnap) { $script:DashSnap.needsHuman }
   try {
-    $open = @(AllTickets | Where-Object { $_.Stage -ne 'done' -and (InLane $_) })
+    $all = @(AllTickets)
+    $open = @($all | Where-Object { $_.Stage -ne 'done' -and (InLane $_) })
     $done = @(CompletedTickets | Where-Object { InLane $_ })
     $tickets = @(@($open) + @($done) | ForEach-Object { DashTicket $_ })
+    $needs = DashNeedsHuman $tickets $all
   } catch { Write-Host ("[{0}] dashboard: ticket list unavailable, keeping the last one: {1}" -f (Get-Date -Format HH:mm:ss), $_.Exception.Message) }
   $cost = try { DashCost (Read-StageLog $RunLog) (Get-Date -Format yyyy-MM-dd) } catch { $null }
   $script:DashSnap = [ordered]@{
     project = $script:DashProject; lane = $(if ($Lane) { $Lane } else { 'main' }); pc = [Environment]::MachineName
     foreman = $env:SWEATSHOP_FOREMAN; session = $Loop; driver = $driver; current = $current
-    tickets = @($tickets); needsHuman = @($tickets | Where-Object { $_.state -in $DashHuman })
+    tickets = @($tickets); needsHuman = @($needs)
     events = @(); pr = $script:PrUrl; costToday = $cost; updatedAt = $null
   }
   Send-Dash
