@@ -99,9 +99,11 @@ device or screen-reader checks nobody did).
 ## 3. Gate through the lock
 
 Parallel loops share one machine; ungated, seven gates at once exhausted RAM and failed
-on timeouts. [`scripts/gate-lock.ps1`](scripts/gate-lock.ps1) holds one of 3
-machine-wide slots while the gate runs and writes `WAIT`, `START`, the output, then
-`EXIT=<code>` to the log.
+on timeouts. [`scripts/gate-lock.ps1`](scripts/gate-lock.ps1) holds one of the
+machine's slots while the gate runs and writes `WAIT`, `START`, the output, then
+`EXIT=<code>` to the log. The slot count is per machine: the number in
+`~/.config/gate-lock/slots`, else 3 (lage-notebook: 1, since two Flutter gates side by
+side got agent sessions killed by `systemd-oomd`, 2026-11-05).
 
 The session dies when its turn ends, and a background task finishing does not wake it.
 So: start the gate with Bash `run_in_background` (`timeout: 7200000`):

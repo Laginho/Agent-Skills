@@ -2,7 +2,12 @@
 # instead of exhausting RAM (7 gates with Flutter at once left 0.5 GB free and failed on timeouts).
 # Log: WAIT, START, the gate output, then EXIT=<code>.
 param([Parameter(Mandatory)][string]$Repo, [Parameter(Mandatory)][string]$Log,
-      [Parameter(Mandatory)][string]$Command, [int]$Slots = 3)
+      [Parameter(Mandatory)][string]$Command, [int]$Slots = 0)
+# No -Slots: this machine's limit from ~/.config/gate-lock/slots (one number), else 3.
+if ($Slots -le 0) {
+  $f = Join-Path $HOME '.config/gate-lock/slots'
+  $Slots = if (Test-Path $f) { [int](Get-Content $f -Raw).Trim() } else { 3 }
+}
 "WAIT $(Get-Date -Format s)" | Out-File $Log -Encoding utf8
 $held = $null
 while (-not $held) {
