@@ -6,8 +6,8 @@
 //     tickets: [{ id, title, state, note }], needsHuman: [{ id, title, state, note }],
 //     events: [{ at: '<ISO>', text }], pr: '<url>' | null, costToday: '$1.234' | '≥$1.234',
 //     updatedAt: '<ISO>' }
-// Two secrets: WRITE_TOKEN (the driver's bearer token) and READ_PASSWORD (HTTP Basic for
-// the page and its poll; any user name). Either one unset refuses its side.
+// One secret: WRITE_TOKEN (the driver's bearer token); unset refuses every write.
+// Reading is public: anyone with the URL sees the page and /api/lanes.
 
 const MAX_BODY = 64 * 1024;
 const WEEK = 7 * 24 * 3600e3;
@@ -19,16 +19,11 @@ export default {
     const { pathname } = new URL(req.url);
     if (pathname === '/api/lane' && req.method === 'POST') return write(req, env);
     if (req.method !== 'GET' || (pathname !== '/' && pathname !== '/api/lanes')) return new Response('not found', { status: 404 });
-    if (!readAllowed(req, env)) {
-      return new Response('password required', { status: 401, headers: { 'www-authenticate': 'Basic realm="sweatshop", charset="UTF-8"' } });
-    }
     if (pathname === '/') return new Response(PAGE, { headers: { 'content-type': 'text/html; charset=utf-8' } });
     const now = Date.now();
     const { results } = await env.DB.prepare('SELECT json, receivedAt FROM lanes WHERE receivedAt > ?')
       .bind(now - WEEK).all();
-    // Only the current run: a running driver (live or silent) or a crash still to look at.
-    const lanes = results.map(r => ({ ...JSON.parse(r.json), receivedAt: r.receivedAt }))
-      .filter(l => l.driver === 'running' || l.driver === 'crashed');
+    const lanes = results.map(r => ({ ...JSON.parse(r.json), receivedAt: r.receivedAt }));
     return Response.json({ now, lanes }, { headers: { 'cache-control': 'no-store' } });
   },
 };
@@ -36,14 +31,6 @@ export default {
 function same(a, b) {
   const enc = new TextEncoder(), x = enc.encode(a), y = enc.encode(b);
   return x.byteLength === y.byteLength && crypto.subtle.timingSafeEqual(x, y);
-}
-
-function readAllowed(req, env) {
-  const m = /^Basic (.+)$/.exec(req.headers.get('authorization') || '');
-  if (!env.READ_PASSWORD || !m) return false;
-  let pair;
-  try { pair = new TextDecoder().decode(Uint8Array.from(atob(m[1]), c => c.charCodeAt(0))); } catch { return false; }
-  return same(pair.slice(pair.indexOf(':') + 1), env.READ_PASSWORD);
 }
 
 async function write(req, env) {
@@ -195,8 +182,10 @@ async function load() {
     var r = await fetch(location.origin + '/api/lanes', { cache: 'no-store' });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     data = await r.json(); error = '';
+    // Only the current run: a running driver (live or silent) or a crash still to look at.
+    data.lanes = data.lanes.filter(function (l) { return l.driver === 'running' || l.driver === 'crashed'; });
   } catch (e) {
-    error = 'Cannot reach the dashboard API (' + e.message + '). Reload the page; it asks for the password again if needed.';
+    error = 'Cannot reach the dashboard API (' + e.message + '). Reload the page.';
   }
   render();
 }

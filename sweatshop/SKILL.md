@@ -127,12 +127,12 @@ model's CLI read-only, prints the answer and the `Proxy decided (<model>)` or
   stage's start and end and at exit, and re-sends it every 2 minutes while a
   stage or proxy call runs: the heartbeat. A lane silent for 10 minutes reads
   `no heartbeat`. The page shows only the current run: running lanes and crashed
-  ones; a finished or stopped lane drops off. Either variable unset turns it off; the run's first lines say
+  ones; a finished or stopped lane drops off (the API still returns the week). Either variable unset turns it off; the run's first lines say
   `dashboard: off` or `dashboard: reporting to <host>`. A failed post is one
   console line and never stops the run. `SWEATSHOP_FOREMAN` is the card's tag
-  (unset: `manual`). The Worker holds two secrets, `WRITE_TOKEN` (the driver's)
-  and `READ_PASSWORD` (the page's, HTTP Basic); deploy with `npx wrangler deploy`
-  from `dashboard/`, then `dashboard/smoke.ps1 -ReadPassword <password>`.
+  (unset: `manual`). The Worker holds one secret, `WRITE_TOKEN` (the driver's);
+  reading is public, so anyone with the URL sees ticket titles and costs. Deploy
+  with `npx wrangler deploy` from `dashboard/`, then `dashboard/smoke.ps1`.
 - `<tracker>/run-log/<id>-<stage>-<when>.txt`: the session's full output (for
   Claude, its JSON result). `.final` beside it holds the session's last message.
 - Beside each stage log: `.runtime.json` records start, observed runtime completion,
