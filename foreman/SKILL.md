@@ -435,7 +435,9 @@ across runs. Fewer than three: the summary is enough.
   scoreboard reads them.
 - **Scoreboard:** a section with the output of `sweatshop/scripts/scoreboard.ps1`,
   run over every repo on this machine that has a `<tracker>/run-log.md` (this run's
-  repo and its siblings), pasted as printed. Never a lane's clone: after the
+  repo and its siblings), with `-Latex`, pasted as printed: it prints booktabs
+  longtables (the preamble loads `longtable` and `makecell`). Never the Markdown
+  in a `verbatim` block: it runs off the page. Never a lane's clone: after the
   copy-back it holds the whole history, and every row would count twice. It is cumulative, not this run's alone:
   it is how the human picks lineups from real tickets instead of a dedicated
   benchmark. Compare it with the previous report's scoreboard and name the rows that

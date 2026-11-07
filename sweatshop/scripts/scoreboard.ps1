@@ -8,10 +8,11 @@
 
 .EXAMPLE
   .\scoreboard.ps1 D:\Desktop\Projects\SynchroNice D:\Desktop\Projects\SIGAA-ME
+  .\scoreboard.ps1 -Latex <repos>   # booktabs longtables for the foreman's PDF report
   .\scoreboard.ps1 -SelfCheck
 #>
 [CmdletBinding(PositionalBinding = $false)]
-param([Parameter(ValueFromRemainingArguments)][string[]]$Repos, [string]$Tracker = '.scratch', [switch]$SelfCheck)
+param([Parameter(ValueFromRemainingArguments)][string[]]$Repos, [string]$Tracker = '.scratch', [switch]$Latex, [switch]$SelfCheck)
 $ErrorActionPreference = 'Stop'
 
 function Inv($f) { [string]::Format([Globalization.CultureInfo]::InvariantCulture, $f, [object[]]$args) }
@@ -136,6 +137,35 @@ function RenderEvidence($rows, $findings, $interventions) {
   foreach ($g in ($interventions | Group-Object Kind)) { '| {0} | {1} |' -f $g.Name, $g.Count }
   if (-not $interventions) { 'Interventions: no structured records; inspect foreman notes for older runs.' }
 }
+# -Latex: each Markdown table becomes a booktabs longtable, other lines become paragraphs. A verbatim
+# paste overflows the page. The report's preamble needs booktabs, longtable and makecell.
+$TexText = 'Implementer', 'Reviewer', 'Implementer -> Reviewer', 'Discovery', 'Intervention'
+function TexEsc($s) { ($s -replace '\\', '\textbackslash{}' -replace '([$%_&#])', '\$1').Replace('>=', '$\geq$').Replace('->', '$\to$') }
+# Headers wrap at ~9 characters, so the nine-column pair table fits an A4 page.
+function TexHead($h) {
+  $w = @($h -split ' ')
+  if ($w.Count -eq 1 -and $h.Length -gt 9 -and $h -notin $TexText) { $k = [int][math]::Floor($h.Length / 2); $w = @(($h.Substring(0, $k) + '-'), $h.Substring($k)) }
+  if ($h.Length -le 9 -or $w.Count -eq 1) { return '\textbf{' + (TexEsc $h) + '}' }
+  $lines = @($w[0])
+  foreach ($x in $w[1..($w.Count - 1)]) { if ($lines[-1].Length + 1 + $x.Length -le 9) { $lines[$lines.Count - 1] += " $x" } else { $lines += $x } }
+  '\textbf{\makecell[b]{' + (($lines | ForEach-Object { TexEsc $_ }) -join '\\') + '}}'
+}
+function ToLatex([string[]]$md) {
+  $out = @('{\footnotesize'); $rows = @()
+  foreach ($l in @($md) + '') {
+    if ($l.StartsWith('|')) { $rows += , @($l.Trim().Trim('|').Split('|') | ForEach-Object { $_.Trim() }); continue }
+    if ($rows.Count) {
+      $hdr = $rows[0]
+      $out += '\setlength\tabcolsep{' + $(if ($hdr.Count -gt 8) { '2pt' } else { '4pt' }) + '}'
+      $out += '\begin{longtable}{@{}' + (-join ($hdr | ForEach-Object { if ($_ -in $TexText) { 'l' } else { 'r' } })) + '@{}}'
+      $out += '\toprule', ((($hdr | ForEach-Object { TexHead $_ }) -join ' & ') + ' \\'), '\midrule', '\endhead'
+      for ($i = 2; $i -lt $rows.Count; $i++) { $out += (($rows[$i] | ForEach-Object { TexEsc $_ }) -join ' & ') + ' \\' }
+      $out += '\bottomrule', '\end{longtable}'; $rows = @()
+    }
+    if ($l.Trim()) { $out += ('\noindent ' + (TexEsc $l.Trim())), '' }
+  }
+  $out + '}'
+}
 function SumShutdown($rows) { ($rows | Measure-Object Shutdown -Sum).Sum }
 function Interventions($file) {
   foreach ($line in Get-Content $file -Encoding UTF8) {
@@ -222,6 +252,10 @@ if ($SelfCheck) {
   $nothing, $externalPairs = Score @() @($extra | Where-Object Discovery -ne 'ticket-review')
   if ($externalPairs.Count) { throw 'Post-approval findings changed reopening rates' }
   Remove-Item -LiteralPath $tmp, $att, $events
+  $tex = (ToLatex @('| Implementer | Reopen rate | Unclassified |', '|---|---|---|', '| a -> b | 50% | $1.50 |', 'S2 >= 1')) -join "`n"
+  if (-not $tex.Contains('\begin{longtable}{@{}lrr@{}}') -or -not $tex.Contains('\makecell[b]{Reopen\\rate}') -or
+      -not $tex.Contains('\makecell[b]{Unclas-\\sified}') -or -not $tex.Contains('a $\to$ b & 50\% & \$1.50 \\') -or
+      -not $tex.Contains('\noindent S2 $\geq$ 1')) { throw "ToLatex: $tex" }
   Write-Host 'Self-check OK'; exit 0
 }
 
@@ -235,9 +269,9 @@ $findings = foreach ($r in $Repos) {
   if (Test-Path $f) { Findings $f (Split-Path $r -Leaf) }
 }
 $impl, $pair = Score @($rows) @($findings)
-Render $impl $pair @($findings)
 $interventions = @(foreach ($r in $Repos) {
   $f = Join-Path $r "$Tracker/interventions.md"
   if (Test-Path $f) { Interventions $f }
 })
-RenderEvidence @($rows) @($findings) $interventions
+$md = @(Render $impl $pair @($findings)) + @(RenderEvidence @($rows) @($findings) $interventions)
+if ($Latex) { ToLatex $md } else { $md }
