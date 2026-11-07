@@ -2,6 +2,17 @@
 
 Read with `SKILL.md`, the loop's owner. These are the rules stage 2 works under.
 
+**`Status: needs-triage` is triaged first, on the loop's base, before any branch.**
+A review opens follow-ups that way (`ticket-shape.md`); nobody has triaged them yet.
+Read the ticket, its origin and the code it names, then decide alone: write the
+contract in the ticket's shape, or close it as `wontfix` (no real defect, or a
+cleanup that reads no better than what it replaces). Design, taste or an
+irreversible call goes to the proxy once, for the whole ticket ("Asking the proxy"):
+an `Escalate` ends at `blocked` as usual. Record the outcome under `## Comments`
+as `Triage by the driver: <outcome> — <reason>`, set `Status: ready-for-agent` or
+`Status: wontfix` (with `Stage: done`), and commit on the loop's base. `wontfix`
+stops there; `ready-for-agent` carries on below, as any ticket would.
+
 **Each red/green cycle separates tests from production.** The load-bearing check is
 the separation in the commits, not any agent's promise, and under the driver a
 script makes it: every commit stage 2 adds is test-only or production-only, or the

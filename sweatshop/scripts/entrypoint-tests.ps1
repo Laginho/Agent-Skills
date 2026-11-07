@@ -157,8 +157,13 @@ if ($ping.Success) {
   Write-Output '{"type":"turn.completed"}'; exit 0
 }
 Add-Content (Join-Path ([IO.Path]::GetTempPath()) "fake-agent-env-$env:FAKE_SCENARIO.txt") "SWEATSHOP_PROXY=$env:SWEATSHOP_PROXY"
-git checkout -qb t-1
 $ticket = Join-Path (Get-Location) '.scratch/feature/issues/T-1.md'
+# A stage 2 triage that closes a review follow-up commits on the session and builds nothing.
+if ($env:FAKE_SCENARIO -eq 'wontfix') {
+  [IO.File]::WriteAllText($ticket, "# T-1: follow-up`nStatus: wontfix`nStage: done`nBlocked by: none`n`n## Comments`n`n- Triage by the driver: wontfix - fixture`n")
+  git add .; git commit -qm triage; Write-Output '{"type":"turn.completed"}'; exit 0
+}
+git checkout -qb t-1
 if ($env:FAKE_SCENARIO -eq 'ask') {
   [IO.File]::WriteAllText($ticket, ((Get-Content $ticket -Raw) -replace 'Stage: \S+', 'Stage: blocked') + "`n- Which seam?`n")
 } else {
@@ -198,5 +203,19 @@ Write-Output '{"type":"turn.completed"}'
   Assert ($text -match 'Stage: blocked' -and ([regex]::Matches($text, '(?m)^- \d{4}-\d\d-\d\d Proxy decided \(gpt-6\.1-sol high\): seam A - fixture \(receipt [^)]+\.json\)$')).Count -eq 2) "Driver answers not recorded: $text"
   Assert (@(Get-Content (Join-Path ([IO.Path]::GetTempPath()) 'fake-agent-env-ask.txt') | Where-Object { $_ -ne 'SWEATSHOP_PROXY=driver' }).Count -eq 0) 'Stage of an unreachable runtime did not get the driver fallback'
   $checks++; Write-Host 'PASS unreachable proxy: the driver answers asked stages, twice per ticket per run'
+
+  # A stage 2 that triages its ticket as wontfix ends at done with no gate evidence: logged, not parked.
+  $target5 = Join-Path $root 'wontfix'; Target $target5 to-implement
+  $remote5 = Join-Path $root 'wontfix-origin.git'; G init -q --bare -b main $remote5
+  G -C $target5 remote add origin $remote5; G -C $target5 push -qu origin main
+  $env:FAKE_SCENARIO = 'wontfix'; $env:FAKE_SKIP_PING = $null
+  $log = Join-Path $root 'wontfix.log'
+  & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File "$source/sweatshop/scripts/sweatshop.ps1" -Repo $target5 -Lineup Codex *> $log
+  Assert ($LASTEXITCODE -eq 0) "Wontfix run crashed: $(Get-Content $log -Raw)"
+  $session = @(G -C $target5 for-each-ref '--format=%(refname:short)' refs/heads/sweatshop/)[0]
+  $text = (G -C $target5 show "${session}:.scratch/feature/issues/T-1.md") -join "`n"
+  Assert ($text -match 'Stage: done' -and $text -notmatch 'Attempt \d') "Wontfix triage parked or retried: $text"
+  Assert ((Get-Content "$target5/.scratch/run-log.md" -Raw) -match '\| triaged wontfix \|') 'Wontfix triage not logged'
+  $checks++; Write-Host 'PASS stage 2 triage to wontfix closes the ticket without gate evidence'
   Write-Host "$checks entry-point checks passed. Fixtures/logs: $root"
 } finally { $env:PATH = $oldPath; $env:FAKE_SCENARIO = $null; $env:FAKE_SKIP_PING = $null }

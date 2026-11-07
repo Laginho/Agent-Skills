@@ -18,7 +18,7 @@ same context. Each lane has its clone as `<repo>` and `-Lane <folder>` among the
 flags. Everything below is per lane (notes file, watch, standup refusals,
 summary, report, sync) except the clock: one check-in covers every lane, a line
 each, and one watch loop polls every lane and exits on the first new line,
-naming its lane. A lane that finishes gets sections 5 to 9 while the others keep
+naming its lane. A lane that finishes gets sections 5 to 10 while the others keep
 running; when the human merges one lane's PR, sync each other open lane
 (section 9) once its driver stops. Make the clone first when it is missing, then
 `<clone>/<tracker>/run-log/` before redirecting into it. `<tracker>` below is
@@ -385,8 +385,7 @@ it is published; publish as the binding says.
 
 Another lane merged after this session opened leaves this lane's PR behind the
 base, maybe in conflict, and its green check tested the session without the
-other lane's code. Sync at the end of every lane run, as the last commit before
-the chat summary (the run's records are on the base by then, so the base's side
+other lane's code. Sync at the end of every lane run, before the PR review of section 10 (the run's records are on the base by then, so the base's side
 of a record already holds this lane's rows), and again whenever the human says
 another lane merged. Never while a driver runs on the clone. In the clone:
 
@@ -420,4 +419,14 @@ another lane merged. Never while a driver runs on the clone. In the clone:
 
 With lanes, the summary's **Your turn** ends with "after merging this PR, tell
 the other open lanes' foremen to sync".
+
+## 10. Review the session PR
+
+Every run that leaves a session PR ends with its review, after the sync and
+before the chat summary: run the `pr-review-loop` skill, section 2 ("One PR"),
+yourself, on the session PR, in a worktree of the session branch in the
+bindings' `Worktrees:` directory, with the reviewer that skill names. Its round
+cap, gate lock and rules hold as written; it never merges. The summary's
+**Your turn** carries its outcome in one line: approved at round k, or what
+stays open after the cap, and the PR gate's last exit code.
 

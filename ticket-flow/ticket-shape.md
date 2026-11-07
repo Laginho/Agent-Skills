@@ -76,3 +76,8 @@ Additions:
   shipped and its stage 3 approved: that ticket's id. It marks an escape, a bug
   review let through, and these tickets become the stage 3 reviewer's eval set.
   Bugs no done ticket's criteria or diff covered carry no line.
+- **A follow-up a review opens.** `Status: needs-triage` with `Stage: to-implement`,
+  and whatever of the shape the review already knows: the driver's next stage 2
+  triages it before building (`stage2.md`). One generation only: when the ticket
+  under review carries a `Triage by the driver:` line, its follow-ups get
+  `Stage: blocked` instead, with the reason, and wait for the human.

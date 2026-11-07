@@ -77,6 +77,7 @@ dispatches on; a stage that moved in a dirty working tree is a stage that can li
 | → `to-review` | stage 2 | metadata handoff after the tested code commit, with valid green gate evidence |
 | → `reviewing` | stage 3 | only if it commits a fix of its own |
 | → `done` | stage 3 | the same commit as the ledger line |
+| → `done` | stage 2 | the triage commit of a `wontfix` (`stage2.md`), on the loop's base |
 | → `to-merge` | stage 3 | the commit the PR is opened from (no-session flow only) |
 | → `to-implement` | stage 3 | the reopen commit |
 | → `blocked` | anyone | with the reason under `## Comments` |

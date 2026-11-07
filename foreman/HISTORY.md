@@ -12,3 +12,4 @@ carry no dates. When a run changes a rule, add its line here.
 - **A merging review can hide a miss.** Measured 2026-10-02: Opus 5.5 xhigh did this on 4 of 5 merges and the scoreboard read 0 %.
 - **Close codex exec's stdin.** Measured 2026-10-02: 10 minutes lost waiting on stdin.
 - **Report build.** Measured 2026-10-01: a `codex update` deleted the bundled Tectonic.
+- **Review the session PR at the end of the run.** Measured 2026-11-07 (EasyMath ui-nova): the PR gate (`check:full`, `por-casa`) runs only in `pr-review-loop`, so the human opened a PR whose full gate nobody had run; Bruno asked for the loop to close every run.

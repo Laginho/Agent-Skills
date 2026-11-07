@@ -377,7 +377,8 @@ function RunStage($t, $model, $effort, $minutes, $label) {
         if ($handoff.HandoffError) { throw $handoff.HandoffError }
         Assert-ProxyReceipts $t.Id $t.Text $handoff.Text
         if ($label -eq 'implement' -and $handoff.Stage -eq 'to-review') { Assert-TestFirst $handoff $from }
-        if ($handoff.Stage -in 'to-review', 'done', 'to-merge') {
+        # A stage 2 triage that closes a follow-up as wontfix built nothing to gate (ticket-flow stage2.md).
+        if ($handoff.Stage -in 'to-review', 'done', 'to-merge' -and (Field $handoff.Text 'Status') -ne 'wontfix') {
           $ref = if ($handoff.Stage -eq 'done') { $Loop } else { $handoff.Branch }
           Assert-GateEvidence $handoff $ref
         }
@@ -1151,6 +1152,10 @@ while (-not (StopAsked) -and ($t = NextTicket)) {
     if ($DryRun) { break }
     if (Park-Infrastructure $t 'implement' $impl $attempt $started) { continue }
     $t = Ticket (Join-Path $Repo $t.File)
+    if ($t.Stage -eq 'done' -and (Field $t.Text 'Status') -eq 'wontfix') {
+      Reset-Tree $t; LogStage $t 'implement' $impl $attempt 'triaged wontfix' $started
+      if (StopAsked) { break }; continue
+    }
     if ($t.Stage -ne 'to-review') {
       if ($p = Progress $before $t.Text $t.Stage) {
         Reset-Tree $t; LogStage $t 'implement' $impl $attempt "progress $p" $started
