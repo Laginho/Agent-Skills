@@ -1,7 +1,6 @@
 # Stage 2: implement test-first
 
-Read with `SKILL.md`, which owns the loop: dispatch, the ticket shape, gate
-evidence and the proxy. These are the rules stage 2 works under.
+Read with `SKILL.md`, the loop's owner. These are the rules stage 2 works under.
 
 **Each red/green cycle separates tests from production.** The load-bearing check is
 the separation in the commits, not any agent's promise, and under the driver a
@@ -10,8 +9,8 @@ handoff is parked. Test files are the usual test paths plus the binding's
 `Test files:`; the tracker is metadata, allowed in either. Whoever writes the tests
 does not make them pass in the same commit, and stage 2 does not touch test files
 in a code commit. Later test-only commits and harness corrections are valid:
-each relevant cycle records its own red/green proof. This rule exists because green tests have sat on top of a broken
-parser — the tests were exercising a copy of the logic.
+each relevant cycle records its own red/green proof. Reason: green tests once sat on top of a broken
+parser, exercising a copy of the logic.
 
 **A committed test wrong in its harness is fixed, not escalated.** Timing, a
 broken helper, a mutant the criteria cannot tell apart from the real code: fix
@@ -37,9 +36,19 @@ the change could break. A regression is a reopen whatever the criteria say.
 
 
 **Red-green proof before reporting.** Show that the new tests fail without the
-change and pass with it. Report the real suite counts, not rounded ones. Every bug
+change and pass with it. Every bug
 fix has a test that would fail without it, and that test calls production code,
 never a copy of it.
 
+**Criteria check before the gate.** About half of all stage 3 findings are a
+numbered criterion the code plainly misses. When the last cycle is green, hand a
+subagent with fresh context (your runtime's own subagent tool, in the foreground, the stage's model)
+the ticket and `git diff <merge-base>..HEAD`, read-only, with one question per
+numbered criterion: which production line meets it, and which test fails
+without that line. Every criterion it cannot point at is a miss: close it with
+another red/green cycle, then ask again about those criteria alone. Record the
+check under `## Comments` as one line per criterion (✅ with `file:line`, or what
+was fixed). A runtime without a subagent tool answers the same questions itself
+and says so in that line.
+
 Hand off at `to-review` with gate evidence (`SKILL.md`, "Gate evidence at handoff").
-Stage 2 stops the moment `to-review` is committed; it does not review its own work.

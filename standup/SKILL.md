@@ -12,7 +12,7 @@ in chat, not a file.
 ## Where the facts come from
 
 1. **Project instructions first.** `CLAUDE.md` / `AGENTS.md` name the tracker and its
-   conventions. Follow those pointers; do not go hunting for TODO files.
+   conventions. Follow those pointers.
 2. **Branches.** Do this before reading any ticket. Refresh first:
    `git fetch --all --prune`, then `git pull --ff-only` (step 5 says what to do when
    it fails). `<base>` is the bindings' base branch from `AGENTS.md`, else the
@@ -30,9 +30,7 @@ in chat, not a file.
      for the tickets in `.scratch/<lane>/`; read every other ticket from `<base>`.
    - **Ticket branches.** Resolve `sweatshop/scripts/ticket-state.ps1` from the
      installed skills and run `powershell -NoProfile -File <helper> -Repo <repo>
-     -Id <ID> -IncludeRemote` for each ticket. This is the same read-only discovery
-     contract as ticket-flow and the driver: lowercase exact ID or prefixed uppercase
-     ID/slug; recovery/asked attempts excluded; ambiguity requires reconciliation.
+     -Id <ID> -IncludeRemote` for each ticket; report an ambiguity it raises.
      For each open ticket whose branch
      exists and is not merged into the loop's base, read it with
      `git show <branch>:<path>`. Exception: `blocked` on the loop's base wins — that
@@ -40,15 +38,14 @@ in chat, not a file.
      name those in one line so they can be deleted.
      `done` on an unmerged ticket branch is invalid handoff, not a closed blocker:
      report the preserved branch and require merge/reopen repair before recommending
-     its dependents. A dirty ticket's working copy is not committed state.
+     its dependents.
    - **Everything else.** Any other branch in
      `git branch -a --no-merged <loop base>` is unmerged work the tracker does not
      name. List them in one line under **In progress** with commits ahead; do not
      read their diffs.
 3. **Tracker.** The standard layout is `.scratch/<feature>/` with `spec.md`, one ticket
    per file under `issues/`, and optionally `ledger.md`. Ticket filenames vary by repo
-   (`NN-slug.md`, `KEY-N-slug.md`, …) — glob the directory rather than assuming a shape,
-   and read `docs/agents/issue-tracker.md` for the repo's own convention when it exists.
+   (`NN-slug.md`, `KEY-N-slug.md`, …); read `docs/agents/issue-tracker.md` for the repo's own convention when it exists.
    - Ticket status: match `\*{0,2}Status:\*{0,2}\s*(\S+)` in the first ~30 lines.
      Closed = `complete`, `resolved`, `wontfix`. Everything else is open
      (`open`, `claimed`, `blocked`, `ready-for-agent`, `ready-for-human`, `needs-*`).
@@ -58,12 +55,8 @@ in chat, not a file.
      loop the ticket actually is (`to-implement` | `implementing` | `to-review` |
      `reviewing` | `to-merge` | `done` | `blocked`). Closed = `done`. Report the
      `Stage` value, never the flattened `open`.
-   - **The tracker is not only on the checked-out branch.** See step 2; every read
-     in this step goes through the branch it picks, not the working tree.
-   - **Read headers in one pass, never one process per file.** A tracker can hold
-     hundreds of tickets, and on Windows every spawned process (`git show`, `grep`,
-     `sed` in a shell loop) costs tens of milliseconds: a per-file loop takes
-     minutes and hits the tool timeout. When the loop's base is the checked-out
+   - **Read headers in one pass, never one process per file.** A per-file process
+     loop over hundreds of tickets hits the tool timeout on Windows. When the loop's base is the checked-out
      branch and up to date, one Grep over `.scratch/**/issues/*.md` for
      `Stage:|Status:|Priority:|Blocked by:|Deferral:` reads every header at once.
      For another branch, pipe the paths into one `git cat-file --batch` (each line
@@ -71,7 +64,7 @@ in chat, not a file.
    - `ledger.md` is a recent-activity log. Column layout varies by repo and it may be
      a bare table (`date | ID | commit`) with no prose. Read the last rows for IDs and
      dates; cross-reference the IDs against `git log` to learn what each one was.
-4. **Resolve blockers.** This is a required step, not optional color. Build a table of
+4. **Resolve blockers.** Build a table of
    every ticket: `ID | status | priority | blocked-by IDs`, across all features in one
    pass. Then, for each open ticket, look up the status of every ID in its
    `Blocked by:` line. A blocker that is closed does not block. A ticket is
@@ -120,18 +113,15 @@ of the product the way the repo's docs do. Cover four things in 4–8 lines:
 - what is left to close the current milestone (unit, feature, phase), in order;
 - what is parked on purpose, why, and what would bring it back (a decision, a
   threshold, a review).
-End with what comes after the milestone. Every claim here has to come from the same
-facts as the blocks below; it is a different view, not a different source.
+End with what comes after the milestone.
 
 **Done** — the last 2–3 closed tickets or ledger entries, feature-level, with IDs and
-dates. Tickets only: no commit hashes, and never lead with tracker migrations, header
-sweeps or other housekeeping commits.
+dates. Tickets only: no commit hashes, no housekeeping commits (step 6).
 
 **In progress** — claimed/in-progress tickets, plus a dirty working tree if any.
 
 **Open** — count of open tickets per feature, and the count must equal the number of
-open ticket files you saw; name the top 3 by priority/dependency order. If a
-phase/feature is fully closed, say so in one line and move on.
+open ticket files you saw; name the top 3 by priority/dependency order.
 
 **Unblocked** — the open tickets as a tree, indented under what blocks them, so the
 reader gets the queue *and* why the rest waits. Roots are the tickets whose blockers are

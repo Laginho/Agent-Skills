@@ -6,8 +6,7 @@ description: Grilling with a stand-in human — the proxy (`sweatshop/scripts/pr
 # Grill through the proxy
 
 Run the `grilling` skill as written, with one change: **each round goes to the
-proxy before it goes to the human.** `grilling` is vendored, so never edit it to
-fit this; what this skill adds is defined here.
+proxy before it goes to the human.** `grilling` is vendored; don't edit it.
 
 ## Each round
 
@@ -43,9 +42,8 @@ of it.
 > migration, anything outward-facing). Escalate when unsure. Decide everything
 > else, and give the reason in one line.
 
-This is broader than the loop's rule in `ticket-flow`'s "Asking the proxy",
-which lets the proxy take design calls. Here the human is present, so design
-stays theirs.
+Wider than the loop's rule in `ticket-flow`'s "Asking the proxy": here the human
+is present, so design stays theirs.
 
 ## What stays the same
 

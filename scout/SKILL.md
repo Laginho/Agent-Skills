@@ -6,8 +6,7 @@ description: "Says which sweatshop lanes can start now, side by side with the on
 # Scout
 
 Answer one question for the current repo: which lanes (`sweatshop/SKILL.md`,
-Lanes) can start now. Read-only apart from `git fetch`; launches nothing. Each lane
-gets its own `foreman` session, which the human opens.
+Lanes) can start now. Read-only apart from `git fetch`.
 
 Run from the main checkout, on the machine that runs the drivers: check 3 reads a
 named mutex, which another machine cannot see, so from there every lane looks idle.
@@ -33,8 +32,7 @@ folder with an `issues/` directory; the first that fails is its reason.
 
        if (Test-Path <clone>) { Set-Location <clone>; $n = 'sweatshop-repo-' + ((Get-Location).Path.ToLower() -replace '[\\/:]', '_'); try { [Threading.Mutex]::OpenExisting($n).Dispose(); 'running' } catch { 'idle' } } else { 'idle' }
 
-   A lane-less driver on the main checkout shows the same way, with the main
-   checkout as the path; it refuses every lane.
+   A lane-less driver shows the same way with the main checkout as the path.
 4. **Work ready.** Read tickets as `standup` does (loop's base, ticket branches via
    `ticket-state.ps1`); the lane's loop base is its open `sweatshop/<folder>/*`
    session, else the base. Ready = a `to-review`, or a `to-implement` whose

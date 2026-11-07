@@ -259,6 +259,22 @@ Check 'gate runner records actual exit and invalidates reused evidence on failur
     Assert ($changedExit -ne 0 -and -not (Test-Path $receipt)) 'Gate attributed evidence after moving HEAD'
   } finally { Pop-Location }
 }
+Check 'ticket gate waits for a free machine gate slot' {
+  Fixture gateslot; Push-Location $Repo
+  try {
+    WriteTicket T-1 to-implement; StartSession
+    $log = Join-Path $root 'slot.log'; $receipt = Join-Path $root 'slot.json'; $held = Join-Path $root 'slot-held'
+    # Another process holds the only slot for 8 s, as a PR gate or another lane's gate would.
+    $holder = "`$m = New-Object System.Threading.Mutex(`$false, 'gate-lock-slot-0'); `$null = `$m.WaitOne(); Set-Content '$held' x; Start-Sleep 8; `$m.ReleaseMutex()"
+    $p = Start-Process $PowerShellExe -ArgumentList '-NoProfile', '-Command', $holder -PassThru -WindowStyle Hidden
+    $deadline = (Get-Date).AddSeconds(30); while (-not (Test-Path $held) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 200 }
+    $runner = Join-Path $PSScriptRoot 'gate-evidence.ps1'
+    $wait = Measure-Command { & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File $runner -Repo $Repo -Command 'Write-Output green' -Log $log -Receipt $receipt -Slots 1 *> (Join-Path $root 'gate-slot-transcript.log') }
+    $p.WaitForExit()
+    Assert ($LASTEXITCODE -eq 0 -and (Test-Path $receipt)) 'Gate behind a held slot did not record evidence'
+    Assert ($wait.TotalSeconds -ge 4) "Gate ran in $([int]$wait.TotalSeconds)s while another process held the only slot"
+  } finally { Pop-Location }
+}
 Check 'lanes keep to their own folder and session' {
   Fixture lanes; Push-Location $Repo
   try {

@@ -1,6 +1,7 @@
 # Runs the bound gate once, or checks the evidence already created by that run.
 [CmdletBinding()]
-param([string]$Repo = '.', [string]$Command, [string]$Log, [string]$Receipt)
+param([string]$Repo = '.', [string]$Command, [string]$Log, [string]$Receipt, [int]$Slots = 0)
+. (Join-Path $PSScriptRoot 'gate-slot.ps1')
 function Save-GateEvidence($repository, $command, $exitCode, $logPath, $receiptPath) {
   if ($exitCode -ne 0) { throw "Gate failed (exit $exitCode); log: $logPath" }
   $ErrorActionPreference = 'Continue'
@@ -37,11 +38,13 @@ if ($Command) {
     if ($full.StartsWith($Repo.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'Gate log and receipt must live outside the repository.' }
   }
   Push-Location $Repo
+  $slot = $null
   try {
     if (Test-Path -LiteralPath $Receipt) { Remove-Item -LiteralPath $Receipt }
     if (& git status --porcelain) { throw 'Commit the tested code before running the gate.' }
     $testedCode = & git rev-parse HEAD
     if ($LASTEXITCODE) { throw 'Cannot identify tested commit.' }
+    $slot = Enter-GateSlot $Slots
     $ErrorActionPreference = 'Continue'
     $shellCode = "`$ErrorActionPreference = 'Stop'; try { & { $Command }; if (`$null -ne `$LASTEXITCODE) { exit `$LASTEXITCODE } } catch { Write-Error `$_; exit 1 }"
     # A script file, not -EncodedCommand: that one writes the gate's errors to the log as CLIXML.
@@ -76,5 +79,5 @@ if ($Command) {
     if ($LASTEXITCODE -or $afterCode -ne $testedCode) { throw 'Gate changed HEAD; evidence cannot be attributed to the starting commit.' }
     Save-GateEvidence $Repo $Command $gateExit $Log $Receipt
     Write-Host "Gate exit $gateExit; log $Log; receipt $Receipt"
-  } finally { Pop-Location }
+  } finally { if ($slot) { $slot.ReleaseMutex() }; Pop-Location }
 }

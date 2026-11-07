@@ -11,8 +11,7 @@ by a fan-out): run section 2 and nothing else.
 
 Read from the repo's `AGENTS.md` bindings, never guess: `PR gate:` (else `Gate:`),
 `Base branch:`, `Worktrees:`. "The gate" below is that command. A `PR gate:` is the
-fuller gate a repo runs only here, once per PR, so tests the ticket gate skips still
-run before approval. The reviewer is the model the human names; else the **stage 3 model of
+fuller gate a repo runs only here, once per PR. The reviewer is the model the human names; else the **stage 3 model of
 the default lineup** in the global `~/.claude/skills/sweatshop/lineups.md`
 (`Models (default)` names the lineup; its `stage 3` entry is model and effort).
 Pass the reviewer to `delegate_task` as a target with `options` (for Codex,
@@ -48,7 +47,7 @@ worktree. Commit messages cite the PR (`(PR #<N>)`).
 **Prepare.** `link_pull_request`; `git fetch origin`; if the branch is behind
 `origin/<base>`, merge it in, so the gate covers what the merge will produce.
 Conflicts in append-only records (run logs, interventions, attribution): keep both
-sides' entries in order. Missing dependencies: install them (`npm --prefix app ci`).
+sides' entries in order.
 Gate the head (the merge, if there was one) before round 1, even when nothing was
 merged: the PR gate covers tests no earlier gate ran. Red is a finding: fix it.
 
@@ -67,12 +66,16 @@ merged: the PR gate covers tests no earlier gate ran. Red is a finding: fix it.
   then each finding with severity P0–P3, `file:line`, a concrete failure scenario,
   and the suggested fix.
 - From round 2: every earlier finding, what happened to it (fixing commit, or the
-  refutation with its evidence), and the objections still open.
+  refutation with its evidence), and the objections still open. The scope narrows to
+  `git diff <head round k-1 reviewed>..HEAD` plus those findings: code an earlier
+  round already read yields a new finding only at P0–P1.
+- Round 4, the last one: also ask whether the open findings share one cause in the
+  PR's approach, and to name it as a single finding if they do.
 
 **Each finding** ends fixed or refuted:
 - Fix it and commit. Same defect elsewhere in the PR: fix those too.
 - Refute it with evidence: a file, a test, a decision record, the ticket's own scope.
-- A real gap outside this PR's scope: open a ticket in the tracker (next free ID across
+- A real gap outside this PR's scope: open a ticket in the tracker, shaped by `ticket-flow/ticket-shape.md` (next free ID across
   the base branch and every open session branch, since lanes number in parallel), and
   send the reviewer the ticket as the refutation.
 - Taste or product calls (visual, tone, app scope): record and leave for the human.
@@ -89,7 +92,9 @@ config or fixture in the change: gate it.
 
 **Stop** when the reviewer answers `VERDICT: APPROVED` with no P0–P2 open and the
 last gate is green (or skipped as docs only) **for the current HEAD**: a commit after the approval (even a P3 fix) needs one more round. Also
-stop when the same finding stays disputed for 3 rounds: report the disagreement.
+stop when the same finding stays disputed for 3 rounds: report the disagreement. Round 4
+is the cap: still not approved after it, stop and report what is open and the
+reviewer's answer on the approach; the human decides whether it goes on.
 
 **Report** to the parent, in the human's language: rounds; every finding with
 severity and fate (commit / refutation / ticket / left to the human); commits pushed;
@@ -98,14 +103,11 @@ device or screen-reader checks nobody did).
 
 ## 3. Gate through the lock
 
-Parallel loops share one machine; ungated, seven gates at once exhausted RAM and failed
-on timeouts. [`scripts/gate-lock.ps1`](scripts/gate-lock.ps1) holds one of the
-machine's slots while the gate runs and writes `WAIT`, `START`, the output, then
-`EXIT=<code>` to the log. The slot count is per machine: the number in
-`~/.config/gate-lock/slots`, else 3 (lage-notebook: 1, since two Flutter gates side by
-side got agent sessions killed by `systemd-oomd`, 2026-11-05).
+Parallel loops share one machine, and concurrent gates exhaust its RAM.
+[`scripts/gate-lock.ps1`](scripts/gate-lock.ps1) holds one of the machine's slots
+while the gate runs and writes `WAIT`, `START`, the output, then `EXIT=<code>` to the log.
 
-The session dies when its turn ends, and a background task finishing does not wake it.
+The turn must stay open (section 2), and a background task finishing does not wake it.
 So: start the gate with Bash `run_in_background` (`timeout: 7200000`):
 
     powershell -NoProfile -File "<skill dir>\scripts\gate-lock.ps1" -Repo "<worktree>" -Log "<log outside the repo>" -Command "<PR gate: binding, else Gate:>"

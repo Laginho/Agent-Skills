@@ -27,8 +27,7 @@ checkout, and two lanes resolving `.scratch/` there would share one notes file. 
 standup refusals look at the lane only: a ticket at `implementing` in another
 folder is another lane's run. `.artifacts-build/` is ignored, so a clean
 `git status` on the main checkout says nothing about lanes running. Start every
-chat line and push notification with the lane's name. Which lane can start
-next is `scout`'s question, not yours.
+chat line and push notification with the lane's name.
 
 ## 1. Standup, then launch
 
@@ -59,11 +58,9 @@ reads from `~/.bashrc`:
     [ -f ~/.sweatshop-dashboard.env ] && { set -a; . ~/.sweatshop-dashboard.env; set +a; }
     SWEATSHOP_FOREMAN='<name>' setsid systemd-run --user --scope --collect --unit=sweatshop-driver-<lane>-<when> pwsh -NoProfile -File <script> <repo> <flags> > <tracker>/run-log/driver-<when>.out 2> <tracker>/run-log/driver-<when>.out.err < /dev/null &
 
-The scope is what makes it outlive the session: a host that runs each agent
-session in its own systemd scope (T3 Code does) kills that scope's whole cgroup
-when the session stops, and `setsid` alone does not leave it (measured
-2026-10-31: a `setsid` driver died with its foreman session, five minutes in).
-Check with `cat /proc/<pid>/cgroup`: it must name the driver's own scope.
+The scope is what outlives the session: T3 Code kills the session's whole cgroup
+on stop, and `setsid` alone does not leave it. `cat /proc/<pid>/cgroup` must name
+the driver's own scope.
 
 Not a background Bash/PowerShell task: those die at their `timeout`, 2 h at
 most. The detached driver does not show in the session's task pane;
@@ -89,11 +86,10 @@ rest of `run-log/`): one timestamped line per launch, stage row, cleanup, proxy
 call and human request, then a `## Pending` list of what the run still owes. A
 run outlives the session watching it, and the notes are what survives a restart. After a restart, read them first and resume from `## Pending`.
 
-Never hold `<tracker>/run-log.md` open. On Windows a `tail -F` on it locks out
-the driver's `Add-Content`, and the driver crashes on its next row. `TaskStop`
-leaves the `tail` orphaned, so the lock outlives the monitor. To watch, poll the driver's `.out` every
-30 s instead, from a background loop that exits on a new line (re-arm it each
-wake; it too dies at 2 h): it prints one line per finished stage
+Never hold `<tracker>/run-log.md` open: on Windows a `tail -F` locks out the
+driver's `Add-Content` and crashes its next row, and `TaskStop` leaves the lock
+behind. Poll the driver's `.out` every 30 s instead, from a background loop that
+exits on a new line (re-arm it each wake; it too dies at 2 h): it prints one line per finished stage
 (`<id> <stage> (<model>): <outcome>, $<cost>`) and every `throw`.
 
 ## 2. Per stage, and the heartbeat
@@ -103,9 +99,7 @@ line, open that stage's `.final` (the session's last message) and check it
 against the outcome: a `to-review` whose last message admits a skipped test, a
 merge whose review raised something it then waved through, a `blocked` question
 the proxy can answer (section 4). One line in chat and in the notes file: what
-the stage did and anything that looks wrong. An outcome says the stage ended,
-not that it was right, and the driver has already moved on to the next ticket.
-
+the stage did and anything that looks wrong.
 **At the second reopen, diagnose before relaunching that ticket.** The driver
 parks it as `blocked` and continues other tickets. Read both review blocks and
 the intervening diff; record `Reopen diagnosis: <cause>; <next action>` under
@@ -116,18 +110,15 @@ caused by review advice requires correcting that advice first. Causes can coexis
 Use the proxy for a contract decision as in section 4. Commit the diagnosis and
 only then restore `to-implement` when the repair is concrete, on the session and
 the retained ticket branch if it has a different Stage. Keep unresolved decisions
-blocked. The existing hard-model escalation remains; changing the model alone
-is not the diagnosis. This diagnosis takes precedence over the generic blocked
+blocked. This diagnosis takes precedence over the generic blocked
 question handling below.
 
-**A timeout park is the foreman's call.** A stage the driver's time limit kills
-(240 min by default since 2026-10-30) spends no attempt and runs again from its
-branch; a second in a row on one ticket parks it with `Stage stopped (timeout)`.
-Read the two stage logs: real progress (a gate still passing tests) means the
-machine is slow, so raise `-ImplementMinutes`/`-ReviewMinutes` at the next
-launch; no output for long stretches means a hang, so fix its cause first. Then
-restore the session's Stage (`to-implement`, or `to-review` after a review); the
-ticket branch already reads it, with its commits kept.
+**A `Stage stopped (timeout)` park is the foreman's call.** Read the two stage
+logs: real progress (a gate still passing tests) means the machine is slow, so
+raise `-ImplementMinutes`/`-ReviewMinutes` at the next launch; no output for long
+stretches means a hang, so fix its cause first. Then restore the session's Stage
+(`to-implement`, or `to-review` after a review); the ticket branch already reads
+it, with its commits kept.
 
 **The 30-minute check-in is a heartbeat**, for the human away from the screen.
 Two sentences in chat, from two sources:
@@ -153,15 +144,12 @@ check-in finds a `.err` file with content and no live `.txt`. Read the tail of
 the stage's `.txt`, `.final` and `.err`, the driver's `.out` and `.out.err`, and `git -C <repo> status`.
 Say what happened, then push-notify.
 
-The driver owns each stage's process job; completed runtimes get a short exit
-grace, and cleanup stops only that job. Read `<stage>.runtime.json` for completion,
-exit, forced cleanup and infrastructure errors. Leave shared processes alone;
-process names are not ownership evidence.
+Read `<stage>.runtime.json` for completion, exit, forced cleanup and
+infrastructure errors; the driver owns its job's cleanup, so leave shared
+processes alone (process names are not ownership evidence).
 
-Before resetting interrupted work, inspect `run-log/recovery.txt`: the driver
-saves recovery refs under `refs/sweatshop-recovery/` and stashes dirty work,
-including untracked files. Preserve those refs and stashes until recovery is
-verified. A driver killed before saving needs the same preservation **before**
+Before resetting interrupted work, inspect `run-log/recovery.txt` and preserve
+the refs and stashes listed there until recovery is verified. A driver killed before saving needs the same preservation **before**
 checkout/reset: save HEAD under a new recovery ref, stash tracked and untracked
 edits if present, retain the stash ref, and record both. Ignored runtime evidence
 stays in `run-log/`; preserve any needed ignored project output separately.
@@ -182,9 +170,8 @@ stays in `run-log/`; preserve any needed ignored project output separately.
 API outage, network, `gh` or `git` transport, machine went to sleep. Any other
 cause — a `throw` from Preflight, a script bug, the same stage failing twice —
 you report and stop; a logic failure restarted is the same failure paid twice.
-A usage limit is not a crash: the driver sleeps until the reset the CLI names
-(`usage limit; waiting until HH:mm`). Only a limit without a time (a dated or
-weekly reset) still stops it.
+A usage limit is not a crash; the driver waits out one that names its reset time.
+Only a limit without a time (a dated or weekly reset) still stops it.
 
 ## 4. Hands off
 
@@ -195,14 +182,14 @@ a line in the summary, not a commit. No subagents: the proxy is
 
 **Push only the session branch and the base.** Never push a ticket branch, even
 after committing a diagnosis on it: review rebases ticket branches locally, and a
-stale `origin` copy makes the branch ambiguous to every reader. A hook in `~/.claude/settings.json` refuses it too.
+stale `origin` copy makes the branch ambiguous to every reader (`~/.claude/hooks/no-ticket-push.py` refuses it where installed).
 
 **A `blocked` ticket with no `Proxy escalated` line is not the human's yet.**
 The driver already puts a stage's question to the proxy during the run; what is
 left came from a third ask in one run, a proxy call that failed, or an older run.
 Run `sweatshop/scripts/proxy.ps1` with the ticket id and a question built from
 `## Comments` and the stage's `.txt`, plus the branch the driver kept for the
-attempt (`recovery/asked/<when>/<ID>`, or a legacy `<branch>-asked-<when>`, named
+attempt (`recovery/asked/<when>/<ID>`, named
 in the `Attempt N stopped to ask` line), so the answer can say "resume from it"
 instead of starting over. Follow `ticket-flow`'s "Asking the proxy": record the
 printed `Proxy decided` line (folded into the body when it changes the contract)
@@ -222,9 +209,7 @@ compares models from. Merge it into `docs/run-log/run-log.md`, never copy over
 it: the copy can hold rows another machine logged. Append this run's rows to the copy, then copy
 the merged file back over the local log, so both disks start the next run with
 the whole history. Commit the copy on the session branch and on the base branch,
-both pushed, in the same commits as the report when there is one. Never
-un-exclude the original.
-
+both pushed, in the same commits as the report when there is one.
 With lanes, every lane's foreman commits these records to the base. When the
 push is rejected, fetch, reset the clone's base to `origin/<base>`, bring the
 report files back from the session branch (`git checkout <session> --
@@ -234,17 +219,11 @@ a conflict in these tables by hand. Copy the merged log back over the clone's
 log and over the main checkout's (`<clone>/../../..`), so the scoreboard there
 sees every lane.
 
-One message in
-chat, then notify. Three blocks:
-
 Before this summary, check the feature acceptance scenarios in the original
 `spec.md` against the integrated session. Run the small supported observable
 probes, reusing existing evidence for identical code. Record scenario, outcome,
 evidence and any unexamined coverage. Human playtests or unavailable devices
-remain pending. Add `Acceptance` and `Disclosure` lines as ticket-flow defines,
-including known deferred defects, links and integration/release impact. Updating
-an older done ticket's comments provides context, not a newly produced ticket.
-Refresh the existing session PR body by incorporating the new disclosures in
+remain pending. Add `Acceptance` and `Disclosure` lines as ticket-flow defines. Refresh the existing session PR body by incorporating the new disclosures in
 the existing ticket-linked acceptance/decision sections, with `gh api -X PATCH
 repos/{owner}/{repo}/pulls/<n> -F body=@<file>` (`gh pr edit` fails on the
 Linux runner); preserve the completed ticket count and approval lines. Metadata
@@ -253,37 +232,41 @@ session branch, commit only Acceptance/Disclosure and supporting evidence, push
 that branch, then return to the base. The summary and PR carry the same pending acceptance. This is a feature
 check from product goals, not another entire ticket review or full gate run.
 
-- **Produced** — the session PR's body, in its order: `Needs your call` and
-  `Review: human` first, `Approve` lines after. Link the PR. Each ticket named
-  there gets one plain-language line, as in the report (section 7, **What was
-  done**). End with the run's
-  cost: the `Cost` column summed over this run's rows, per model, with `?` rows
-  counted apart. It is API list price, not what the plan charged. Beside each
-  Codex model's cost, the share of the weekly Codex quota it spent (section 7,
-  **Codex quota**).
-  Link the report's PDF when there is one, with its two commits (section 7,
-  **Record**).
-- **Foreman** — restarts, cleanups, every `Proxy decided` line grouped by who
-  decided (the model in its parentheses; older lines say `opus` or
-  `gpt-6-astra high, fallback`, and a line without `(<who>)` is legacy, unknown),
-  anything you noticed and left alone. Count the ones the driver answered for a
-  runtime that could not reach the proxy (its `proxy from <runtime> sessions` line
-  in the `.out`). An older proxy line with no receipt, written by the stage's own
-  model, is not a proxy decision: list it apart, as the stage's judgement. Record interventions once in `<tracker>/interventions.md`:
-  `| When | Ticket | Kind | Evidence |`, with an ISO timestamp, ticket id or `-`,
-  and a link to the note/commit. Kind is `human-rescue` (unplanned human work to
-  unblock execution), `routine-approval` (the intended merge/release decision),
-  `proxy-decision`, or `automatic-recovery`. A `proxy-decision` Evidence starts
-  with the line's head, `Proxy decided (<who>)`, so the scoreboard can separate
-  them. A routine approval is not a rescue.
-  Commit this record with the attribution. Older missing records are unknown.
-- **Your turn** — one line per action only the human can take: this ticket
-  needs your decision (quote the question from `## Comments`), this PR needs your
-  review, this stage is stuck and I did not touch it.
+Record the run's interventions once in `<tracker>/interventions.md`:
+`| When | Ticket | Kind | Evidence |`, with an ISO timestamp, ticket id or `-`,
+and a link to the note/commit. Kind is `human-rescue` (unplanned human work to
+unblock execution), `routine-approval` (the intended merge/release decision),
+`proxy-decision`, or `automatic-recovery`. A `proxy-decision` Evidence starts
+with the line's head, `Proxy decided (<who>)`, so the scoreboard can separate
+them.
 
-Every confirmed unresolved finding found here needs an open follow-up or an
-explicit accepted deferral with impact and evidence. Closed-ticket Comments
-alone are history; preserve their link and give the finding a visible destination.
+Then one message in chat, then notify. The human reads it to act, so it holds
+what they do next and what changed, and the run's mechanics live in the
+records (report appendix, `interventions.md`, run log). Three blocks, in order:
+
+- **Your turn** — first, and split in two:
+  - *Needs you:* one line per action only the human can take: a `Needs your
+    call` ticket (quote its question), a `Review: human` ticket, the session PR
+    to merge, a stage stuck that you did not touch. With more than one lane, the
+    merge order: from the main checkout, after `git fetch`, `git merge-tree
+    --write-tree origin/<base> origin/<session>` per open lane PR; clean ones
+    first, a conflicting one names its files. After the first merge the others
+    sync (section 9).
+  - *Nothing for you:* the `Approve` tickets as one line with their count and ids.
+  - *Hand tests* only when the lane's feature is finished (every ticket of the
+    lane `done`): the acceptance scenarios left pending for a person, as a
+    checklist with where to look. Before that, one line: nothing to test by
+    hand yet. Partial progress is not playtested.
+- **What changed** — link the session PR, then one plain-language line per
+  ticket (`report.md`, **What was done**): what changes for whoever uses the
+  product, and where the risk is when there is one.
+- **Record** — one line: the run's cost (the `Cost` column summed over this
+  run's rows, per model, `?` rows counted apart; API list price, not what the
+  plan charged; beside each Codex model, its share of the weekly Codex quota,
+  `report.md`, **Codex quota**), and the report's PDF link with its two commits
+  (section 7, **Record**) when there is one. Restarts, cleanups, proxy decisions
+  and what you noticed and left alone go to the report's appendix, not the chat.
+
 Meaningful production behavior authored during review needs the independent
 review record required by ticket-flow; absence is a pending integration condition.
 
@@ -327,8 +310,7 @@ GPT-6 Astra at medium effort, read-only, with this rubric and the evidence paths
 
     codex exec -C <repo> -m gpt-6-astra -c model_reasoning_effort=medium -c approval_policy='"never"' --sandbox read-only --color never --output-last-message <scratch>/<id>-r<n>.md "<rubric + evidence>" < /dev/null
 
-Close its stdin as above: with stdin open, `codex exec` prints "Reading additional
-input from stdin..." and waits forever.
+`< /dev/null` is required: `codex exec` waits on open stdin.
 
 Its labels go in as returned. You may add a line of disagreement in the report,
 never change the row.
@@ -349,25 +331,15 @@ with evidence in `Why`. Preserve the S1/S2/S3 attribution: a review miss can als
 be an implementation defect. No `|` inside a cell.
 
 Before the summary, check new session PR reviews, release audit reports and
-confirmed user defect reports available since the last attribution pass. Record
-confirmed defects found **after ticket approval** in this same table, linking
-the original report/finding in `Why`; do not start another audit. Discovery is
-`session-review`, `release-audit`, or `post-release`; use `Round: -`. Identify the
-originating ticket/commit only when the history supports it, otherwise `ID: -`,
-`Origin: unknown`, and unknown models. Use `Label: unclassified` until evidence
-supports the existing rubric. These rows count discoveries separately; they do
-not enter the implementer/reviewer reopening rate. A pre-release audit catch is
-not a post-release defect. Link follow-up fixes to the same finding instead of
-counting each repeat audit as a new defect. Do not infer absence of defects from
-absence of reports, or count unconfirmed suspicions as defects.
-
-Keep historical eight-column tables intact; append a twelve-column header before
-new rows. Older flags remain unknown. Record each finding once using its source
-report and finding location; subsequent runs check those links before appending.
-The audit remains read-only except its report: attribution is done here, after
-that report exists. Commit attribution and interventions on the session with the
-run records. A confirmed later report can be incorporated at the next foreman
-summary; publication does not depend on completing this bookkeeping.
+confirmed user defect reports since the last pass. Record confirmed defects
+found **after ticket approval** in this table, linking the source in `Why`.
+Discovery is `session-review`, `release-audit`, or `post-release`; `Round: -`.
+Originating ticket/commit only when the history supports it, otherwise `ID: -`,
+`Origin: unknown`, unknown models, `Label: unclassified`. These rows do not enter
+the implementer/reviewer reopening rate. Link follow-up fixes to the same finding.
+When a legacy eight-column table exists, append a twelve-column header before new
+rows. Record each finding once, by its source report and finding location;
+check those links before appending.
 
 ## 7. Report (runs of three or more tickets)
 
@@ -389,94 +361,18 @@ across runs. Fewer than three: the summary is enough.
   repo on the base branch.
   The summary names both commits next to the PDF link; no hashes there means the
   report was not recorded.
-- **Build:** any LaTeX engine on the PATH (`tectonic -X compile <file>.tex`).
-  The preamble loads `fontspec`, not `inputenc`/`fontenc`: Tectonic is XeTeX, and the T1
-  font drops — and … (measured 2026-10-31).
-  Recompile until there are no overfull-box warnings. None: Codex's bundled
-  Tectonic under `~/.codex/.tmp/`, which a `codex update` can delete. Still none: commit the `.tex`, say so in the summary, and offer to
-  download Tectonic from its GitHub release into a folder on the PATH.
-- **Shape:** the newest report in `docs/relatorios/` is the template; keep its
-  sections so runs compare side by side. Without one: summary (produced, cost,
-  the one thing that went wrong, provisional verdict), timeline, per-stage table
-  (minutes, tokens, cache, output, cost, outcome) with a chart of where the input
-  went and what was wasted, comparison with the previous runs from `run-log.md`,
-  observations per model, driver and runtime issues, numbered recommendations,
-  every `Débito humano:` line of the run, and every `Proxy decided` line of the
-  run's tickets, quoted per ticket with who decided (the model in the line,
-  or legacy unknown). Those are the calls made on the human's
-  behalf; a count without the text sends them hunting through the tickets.
-- **What was done:** right after the summary, one short paragraph per ticket the
-  run worked on, for a reader who never opened the tickets (a ticket's title and
-  criteria are too abstract and too specific). Say what changes for whoever uses
-  the product, the main file, and for each reopen what was broken, its cause and
-  the file, as in "BUG-001: the scroll broke below 854x480; a hard-coded
-  `set_size` in `render_ui.py` caused it." Sources: the ticket on the session
-  branch, its merge diff and the review findings (section 6), never memory.
-  Tickets of one kind (content drafts) can share a paragraph with a line each.
-- **Roadmap image:** when `AGENTS.md` has a `Roadmap:` binding, the per-session
-  roadmap as this run left it goes right after **What was done**. On the
-  session branch, run the binding's per-session command, render its SVG to
-  `docs/relatorios/<report>-roadmap.png` as the binding says, and
-  `\includegraphics` it. Then restore the files the command wrote
-  (`git checkout -- <files>`) before committing anything: they are tracked, and
-  every lane would conflict on them. Commit the PNG with the `.tex` and `.pdf`.
-  A generator that fails means no image: quote its error in the report and go on.
-- **Codex quota:** next to the cost per model, the percentage of the weekly
-  Codex quota each Codex model spent, from `sweatshop/scripts/codex-quota.ps1
-  -Tracker <tracker> -Since <launch> -Until <last row>`. Split a model that
-  played two roles (hard implementer and reviewer) by stage. Name the plan, say
-  the total is exact while one stage is ±1 point (Codex rounds to integers), name
-  any Codex thread that ran outside the stages (it shares the quota), and say so
-  when the weekly window reset mid-run. Claude models get `--`.
-- **Reopen attribution:** section 6's rows for this run as a table (ticket, round,
-  finding, label, why, and who judged it when it was not you), the totals per label,
-  and the review-miss and churn cases. Separate session-review, release-audit and
-  post-release discoveries, retaining unknown origins. Place it before the scoreboard, since the
-  scoreboard reads them.
-- **Scoreboard:** a section with the output of `sweatshop/scripts/scoreboard.ps1`,
-  run over every repo on this machine that has a `<tracker>/run-log.md` (this run's
-  repo and its siblings), with `-Latex`, pasted as printed: it prints booktabs
-  longtables (the preamble loads `longtable` and `makecell`). Never the Markdown
-  in a `verbatim` block: it runs off the page. Never a lane's clone: after the
-  copy-back it holds the whole history, and every row would count twice. It is cumulative, not this run's alone:
-  it is how the human picks lineups from real tickets instead of a dedicated
-  benchmark. Compare it with the previous report's scoreboard and name the rows that
-  moved. Read it under three rules:
-  - A reopen rate belongs to the implementer → reviewer pair. Compare implementers
-    only under the same reviewer, and reviewers only over the same implementer.
-  - A pair under 10 reviews is an anecdote. Say so next to any conclusion drawn from it.
-  - A row without an effort (`sonnet`, `gpt-6-luna`) predates the effort column.
-    Never fold it into a row that has one.
-  - Judge an implementer by the `S2 rate`, not the raw reopen rate: a reopen with no
-    S2 finding was the spec's or the reviewer's. While `Unclassified` is above zero
-    the S2 rate is a floor. `S1` counts in the findings table point at stage 1,
-    `S3 noise` at the reviewer. Read `Fixed in review for S2` beside the S2 rate:
-    a reviewer that fixes instead of reopening shows a low rate and a high fixed
-    count, and the implementer's misses are the two added together.
-
-  Read the evidence table as counts within recorded coverage, not defect rates.
-  Compare human rescues separately from routine approvals, proxy decisions and
-  automatic recoveries. `Shutdown s` is sampled runtime-completion to process-exit
-  delay, including forced shutdown; `?` is unmeasured, never zero. Preserve missing
-  history as unknown rather than comparing it with newly instrumented runs.
-
-  A recommendation to change a lineup names the scoreboard rows it rests on.
-- **Numbers come from the logs, never from memory:** `run-log.md` rows, the
-  stages' `.txt` (Codex: `turn.completed` usage), `git log` of the session. A
-  count you did not recompute from them does not go in. When a row's outcome
-  lies (the driver read a stale copy), say so and report what really happened.
+- **Build and content:** read [`report.md`](report.md) beside this file (build,
+  shape, **What was done**, roadmap image, **Codex quota**, attribution,
+  scoreboard rules) and follow it.
 
 ## 8. Published roadmap
 
-A `Roadmap:` binding in `AGENTS.md` lists each roadmap with its command, its page
-and when it is published. Publishing one means: render the PNG, read the page
-first (the human edits it), replace its image, and fetch it again to confirm.
-Without a tool for the pages, leave the PNG and say where it is.
+A `Roadmap:` binding in `AGENTS.md` lists each roadmap with its command and when
+it is published; publish as the binding says.
 
 - **Per-session roadmap**: publish it at the end of every run, after the section 9
   sync, from the session branch. That branch is the base plus this lane, so the
-  page shows the run's work before the merge. It is the same image the report
-  embeds (section 7). Its files stay out of git, as the binding says.
+  page shows the run's work before the merge. Its files stay out of git, as the binding says.
 - **Every other roadmap**: publish from the main checkout, never from a lane,
   at the moment the binding names, or when the human asks. Only the base after
   the merge holds every lane's tickets, and two foremen would overwrite each

@@ -8,19 +8,16 @@ description: The unattended ticket-flow driver — runs fresh Claude Code, Codex
 `scripts/sweatshop.ps1 <repo> [-Lineup <name>]` runs the lineup's models: each
 stage on the runtime its model belongs to (`provider/model` on OpenCode, `gpt-*`
 on Codex, the rest on Claude Code), so a lineup may pair a Codex implementer with
-a Claude reviewer.
-`scripts/sweatshop-codex.ps1 <repo>` is `-Lineup sol`. It sends bare ids into a fresh CLI session, one stage at a
-time, then reads `Stage:` back. **The driver adds
-no instructions of its own.** Everything a session does, it does because
+a Claude reviewer. `scripts/sweatshop-codex.ps1 <repo>` is `-Lineup sol`. It sends
+bare ids into a fresh CLI session, one stage at a time, then reads `Stage:` back.
+**The driver adds no instructions of its own.** Everything a session does, it does because
 `ticket-flow/SKILL.md` says so; this file owns only the driver.
 
 ## What one run does
 
-1. **Updates itself before loading runtime/helpers.** `git pull --ff-only` in the repo this skill lives in. A
-   pull that fails stops the run — a driver that runs stale on one machine and
-   fresh on the other is the bug this step exists to kill. A changed revision
-   reparses the entry point once with all original arguments; the executing
-   driver file's SHA256 is announced. Standalone copies skip update.
+1. **Updates itself.** `git pull --ff-only` in the repo this skill lives in. A
+   pull that fails stops the run: a driver stale on one machine and fresh on the
+   other is the bug this step kills. A changed revision reparses the entry point once.
 2. **Preflight.** Clean tree, on the bindings' base branch, base pulled, no
    ticket left `implementing` or `reviewing` by a run that died. Before the first
    stage it pings the proxy (see The proxy); no answer stops the run.
@@ -33,16 +30,14 @@ no instructions of its own.** Everything a session does, it does because
 4. **Runs tickets** until nothing is runnable: `to-review` first, then any
    `to-implement` whose `Blocked by` are all `done` — `done` on the session, so
    dependents start on top of what they depend on, no human merge in between.
-   A `Blocked by` that names no ticket on the session would never turn `done`:
-   before the first stage the driver parks such a ticket `blocked`, naming the
-   missing ID. Stage 2 runs on the lineup's `hard` model instead of its `stage 2` one when
-   the ticket says `Difficulty: hard` or carries two `Verdict: Reopen` lines;
-   the run log's `Model` column shows which one ran. After the second reopen,
-   park that ticket for the foreman's cause diagnosis before another attempt;
-   other runnable tickets continue. The reviewer never changes.
-   A stage 2 that commits `to-implement` with a grown `Progresso: <k> de <M>`
-   (`ticket-flow`, partial handoff) logs `progress k/M`, spends no attempt, and
-   the next stage 2 resumes the branch.
+   A `Blocked by` that names no ticket on the session is parked `blocked`
+   before the first stage. Stage 2 runs on the lineup's `hard` model instead of its
+   `stage 2` one when the ticket says `Difficulty: hard` or carries two
+   `Verdict: Reopen` lines (the run log's `Model` column shows which ran). After the
+   second reopen, park that ticket for the foreman's cause diagnosis before another
+   attempt; other runnable tickets continue. The reviewer never changes. A grown
+   `Progresso: <k> de <M>` (`ticket-flow`, partial handoff) logs `progress k/M` and
+   spends no attempt.
 5. **Stops and reports.** Prints the open tree, then pushes the session and
    opens its PR against the base — or updates the body if the PR exists — and
    returns to the base branch.
@@ -53,29 +48,24 @@ new session, because the old one is now merged and the search skips it.
 
 ## The session PR
 
-Titled with the repo first, `<repo>: <session branch>` with slashes as spaces
-(`Agent-Skills: sweatshop 2026-10-29-1430`), so an inbox of several projects'
-session PRs says which project each is. Every publish rewrites the title too.
+Titled `<repo>: <session branch>` with slashes as spaces (`Agent-Skills: sweatshop
+2026-10-29-1430`), so an inbox of several projects' PRs says which is which.
 
 One line per ticket that reached `done` on the session — id, `Review:`, verdict
-— with the ones that want a human first: `Needs your call` and `Review: human`
-at the top, `Approve` from `Review: agent` below. That order is the whole point:
-open the PR, read from the top. The same body includes ticket-linked proxy
-decisions, pending product acceptance and known deferred defects with their
-integration/release impact. `Approve` is implementation approval; missing legacy
-acceptance is unknown. Tickets transitioning from non-done to done on the
-session count as completed, including an explicit reopen/recompletion cycle.
-Old done tickets with comment edits
-remain disclosure context when relevant, outside that count.
+— `Needs your call` and `Review: human` at the top, `Approve` from `Review: agent`
+below: open the PR, read from the top. The body also carries proxy decisions,
+pending product acceptance and known deferred defects with their release impact.
+`Approve` is implementation approval; missing legacy acceptance is unknown. A
+ticket going from non-done to done (a reopen cycle included) counts as completed;
+old done tickets with comment edits are disclosure context only.
 
 Edit on the branch if something needs fixing, then merge. Nothing flows back to
 the tickets; the PR is the record. A ticket you disagree with is reopened the
 way `ticket-flow` already says (`Stage: to-implement`, ❌ on the criterion). An
 edit big enough to matter is a `CLEAN-*` ticket, not a retrofit.
 
-The base moving while a session is open is not the driver's problem: the session
-meets it in the PR. With lanes, the foreman syncs the session with the base
-(`foreman`, section 9); what the sync cannot resolve is the human's call.
+The base moving while a session is open is not the driver's problem: with lanes
+the foreman syncs the session (`foreman`, section 9); the rest is the human's call.
 
 ## The proxy
 
@@ -84,61 +74,53 @@ the model its `model:` line names (any runtime's id; Claude ids pinned). Every
 caller, attended or not, reaches it through `scripts/proxy.ps1`, which runs that
 model's CLI read-only, prints the answer and the `Proxy decided (<model>)` or
 `Proxy escalated (<model>)` line to record, and writes a receipt under
-`sweatshop-proxy` in the temp folder (`%TEMP%`, `/tmp` on Linux). Changing the proxy's model is editing those two lines.
+`sweatshop-proxy` in the temp folder. Changing the proxy's model is editing those two
+lines; Claude ids are pinned to a version.
 
 - **Pings, before the first stage.** `proxy.ps1 -Ping` must answer
-  `Decision: pong`, or the run stops. Then, for each runtime in the lineup, a
-  short session with a stage's own flags runs the same ping from inside its
-  harness. A receipt means that runtime's stages call the proxy themselves; none
-  means they cannot (inside the Codex sandbox a nested `claude` call hangs), so they run with `SWEATSHOP_PROXY=driver`, where
-  `proxy.ps1` fails at once and the stage stops with its question. The `.out`
-  says which: `proxy from <runtime> sessions: reached directly | unreachable`.
+  `Decision: pong`, or the run stops. Then each runtime in the lineup runs the same
+  ping from inside its harness. A receipt means that runtime's stages call the proxy
+  themselves; none means they cannot (inside the Codex sandbox a nested `claude`
+  call hangs), so they run with `SWEATSHOP_PROXY=driver`, where `proxy.ps1` fails at
+  once and the stage stops with its question. The `.out` says which: `proxy from
+  <runtime> sessions: reached directly | unreachable`.
 - **The driver answers a stage that asked.** A stage 2 that ends `blocked` or on a
   question, with no `Proxy escalated` line of its own, has its question put to the
   proxy by the driver. A `Decision` is recorded under `## Comments` with the whole
   answer quoted, and the ticket goes back to `to-implement`; an `Escalate` is
-  recorded and the ticket stays `blocked` for the human. Twice per ticket per run;
-  a third ask waits for the human.
-- **Receipts are checked.** Every `Proxy decided` or `Proxy escalated` line a
-  stage adds must name a receipt for that ticket and that model, or the handoff
-  is parked like missing gate evidence. Older lines are history.
+  recorded and the ticket stays `blocked`. Twice per ticket per run; a third ask
+  waits for the human.
+- **Receipts are checked:** a `Proxy decided` or `Proxy escalated` line without a
+  receipt for that ticket and model parks the handoff.
 
 ## What the driver writes
 
 - `<tracker>/run-log.md`: one row per **stage run** — when, id, stage, model
   with its effort (`sonnet-5 xhigh`), attempt, outcome, session, minutes, tokens, cost, and sampled runtime-completion to process-exit
-  `Shutdown s` (`?` when unmeasured). One row per ticket would collapse stage 2
-  and stage 3 into one duration and drop the model, the two axes worth
-  correlating later ("tickets shaped like X cost sonnet three attempts").
-  Nothing about the ticket is copied in; the ticket file is in git. The
-  aggregate line printed at the end is the trigger to investigate, not the
-  investigation.
-- **Cost** is USD at API list price, the one measure both runtimes give; no
-  subscription bills it, it is what to hold against the plan's price. Claude
-  prices its own session (`total_cost_usd`, subagents included). Codex reports
-  tokens only; the driver prices them from `$CodexPrices` in the script, at
-  short-context rates, so a long-context stage reads low. A model missing from
-  that table logs `?`, never a guess: add its row from OpenAI's pricing page.
-  From 2026-10-20 a Codex stage's cost includes its subagent rollouts, and a
-  stage killed by time is priced from its rollout as a lower bound.
+  `Shutdown s` (`?` when unmeasured). Stage rows, not ticket rows, so stage 2 and
+  stage 3 keep their own duration and model. The aggregate line printed at the end
+  is the trigger to investigate, not the investigation.
+- **Cost** is USD at API list price, the one measure both runtimes give; hold it
+  against the plan's price. Claude prices its own session (`total_cost_usd`,
+  subagents included). Codex reports tokens only; the driver prices them from
+  `$CodexPrices` in the script, at short-context rates, so a long-context stage
+  reads low. A model missing from that table logs `?`, never a guess: add its row
+  from OpenAI's pricing page. A Codex stage's cost includes its subagent rollouts,
+  and a stage killed by time is priced from its rollout as a lower bound.
 - **The dashboard** (`dashboard/`, a Cloudflare Worker and D1 table): with
-  `SWEATSHOP_DASH_URL` and `SWEATSHOP_DASH_TOKEN` set, the driver posts its
-  lane's snapshot (`dashboard/worker.js` has the shape) at run start, at each
-  stage's start and end and at exit, and re-sends it every 2 minutes while a
-  stage or proxy call runs: the heartbeat. A lane silent for 10 minutes reads
-  `no heartbeat`. The page shows only the current run: running lanes and crashed
-  ones; a finished or stopped lane drops off (the API still returns the week). Either variable unset turns it off; the run's first lines say
-  `dashboard: off` or `dashboard: reporting to <host>`. A failed post is one
-  console line and never stops the run. `SWEATSHOP_FOREMAN` is the card's tag
-  (unset: `manual`). The Worker holds one secret, `WRITE_TOKEN` (the driver's);
-  reading is public, so anyone with the URL sees ticket titles and costs. Deploy
-  with `npx wrangler deploy` from `dashboard/`, then `dashboard/smoke.ps1`.
+  `SWEATSHOP_DASH_URL` and `SWEATSHOP_DASH_TOKEN` set, the driver posts its lane's
+  snapshot and a heartbeat (shape and intervals in `dashboard/worker.js`; a lane
+  silent for 10 minutes reads `no heartbeat`). The page shows only running and
+  crashed lanes. Either variable unset turns it off; the run's first lines say
+  `dashboard: off` or `dashboard: reporting to <host>`. A failed post never stops
+  the run. `SWEATSHOP_FOREMAN` is the card's tag (unset: `manual`). Reading is
+  public: anyone with the URL sees ticket titles and costs. Deploy with
+  `npx wrangler deploy` from `dashboard/`, then `dashboard/smoke.ps1`.
 - `<tracker>/run-log/<id>-<stage>-<when>.txt`: the session's full output (for
-  Claude, its JSON result). `.final` beside it holds the session's last message.
-- Beside each stage log: `.runtime.json` records start, observed runtime completion,
-  exit, forced cleanup and infrastructure errors; `.row.txt` saves the outcome
-  before the cumulative log append. A failed append stops between stages and
-  leaves its row for reconciliation by the foreman.
+  Claude, its JSON result); `.final` holds its last message, `.runtime.json` the
+  start, completion, exit, forced cleanup and infrastructure errors, `.row.txt` the
+  outcome saved before the cumulative append. A failed append stops between stages
+  and leaves its row for the foreman to reconcile.
 - Each CLI launches suspended into its own Windows Job Object before running.
   Normal exit, a ten-second grace after a terminal runtime event, or the stage
   time limit (below) closes that job and its descendants. On Linux (`pwsh` 7) the job is a
@@ -157,18 +139,16 @@ model's CLI read-only, prints the answer and the `Proxy decided (<model>)` or
 - **A retry resumes.** A stage 2 that stopped short of `to-review` keeps its
   branch. If the branch says `implementing` (stage 3's: `reviewing`), the driver
   commits it back to `to-implement` (`to-review`) on that branch, unpushed, with a
-  `Driver retry: <why>` note, so the next session resumes the commits instead of
-  stopping on a stage found mid-run. Measured 2026-10-30: CLEAN-072, CLEAN-073,
-  CLEAN-079 and APP-048 each spent attempt 2 stopping on `implementing`.
+  `Driver retry: <why>` note, so the next session resumes instead of stopping on a
+  stage found mid-run.
 - **The time limit is a backstop for hangs.** `-ImplementMinutes` and
-  `-ReviewMinutes` default to 240: on 2026-10-30, four lanes on one Linux notebook,
-  a gate alone took 40–60 min, and stages killed at the old 60-min limit spent
-  attempts on real work. Pass lower or higher values for one run. A stage the limit
-  kills spends no attempt and writes no `Attempt N failed`: its row says
-  `timeout, not counted`, edits it left are saved as above, and the ticket runs
-  again from its branch. Two timeouts in a row on one ticket (one run) park it:
-  row `timeout, parked`, `Stage: blocked` on the session with a `Stage stopped
-  (timeout)` note for the foreman, branch already resumable.
+  `-ReviewMinutes` default to 240: a gate alone takes 40–60 min on a loaded Linux
+  notebook, and a shorter limit spent attempts on real work. Pass other values for
+  one run. A stage the limit kills spends no attempt and writes no `Attempt N
+  failed`: its row says `timeout, not counted`, its edits are saved as above, and
+  the ticket runs again from its branch. Two timeouts in a row on one ticket (one
+  run) park it: row `timeout, parked`, `Stage: blocked` on the session with a
+  `Stage stopped (timeout)` note for the foreman, branch already resumable.
 - Under `## Comments` of a ticket, committed on the session: `Attempt N failed:
   <reason>` after a stage 2 that did not reach `to-review` for any other reason; `Stage: blocked`
   after the second, or at once when the session ended on a question or committed `blocked` itself (its whole last message is kept). A stage
@@ -176,34 +156,27 @@ model's CLI read-only, prints the answer and the `Proxy decided (<model>)` or
   `recovery/asked/<yyyymmdd-hhmmss>/<ID>` and names it in the note, so the answer can
   resume from it while the next stage 2 still starts clean. An API outage
   spends no attempt; two in a row stop the run. A usage limit that names its
-  reset time (`try again at 1:38 PM`) is waited out instead. A refused request
-  (a 400 `invalid_request_error`, such as a CLI too old for its model) stops the
-  run at once, since a retry sends the same request: update the CLI, relaunch.
+  reset time is waited out instead. A refused request (a 400
+  `invalid_request_error`) stops the run at once, since a retry sends the same
+  request: update the CLI, relaunch.
 
 Both log paths are in `.git/info/exclude`: local, never in a commit. Active branch
-discovery uses `scripts/ticket-state.ps1`, shared with dispatch and standup;
-legacy asked branches and recovery names are preserved but excluded. Ambiguity,
-unmerged `done` and missing/stale gate evidence cannot unlock dependents. A bad
-stage handoff is parked with its work retained, rather than reported as merged.
-Two more handoff checks park the same way: a stage-2 commit that touches both test
-files and production (test paths, plus the binding's optional `Test files:` regex
-for fixtures kept beside production; the tracker counts as neither), and a proxy
-line without a matching receipt.
+discovery uses `scripts/ticket-state.ps1`, shared with dispatch and standup.
+Ambiguity, unmerged `done` and missing/stale gate evidence cannot unlock
+dependents. A bad stage handoff is parked with its work retained, rather than
+reported as merged; two more park the same way: a stage-2 commit that touches both
+test files and production (test paths, plus the binding's optional `Test files:`
+regex for fixtures kept beside production; the tracker counts as neither), and a
+proxy line without a matching receipt.
 
 `scripts/scoreboard.ps1 <repo> [<repo>...]` reads those logs across repos and
-prints two tables: one per implementer (stage runs, failed and asked attempts,
-median minutes, cost), and the reopen rate per implementer → reviewer pair. Each
-review is charged to whoever last sent the ticket to review. It reads files only;
-`-SelfCheck` tests the attribution, including legacy tables. Its additional
-findings table separates ticket/session/release-audit/post-release discoveries,
-review misses and review-induced churn; `interventions.md` separates rescues from
-routine approvals, proxy decisions and automatic recovery. Unknown history stays
-unknown. Run `powershell -NoProfile -File scripts/runtime-tests.ps1` (`pwsh` on Linux) for the local
-process, log-lock and recovery regression tests (no agent or network).
+prints a table per implementer and the reopen rate per implementer → reviewer pair
+(each review is charged to whoever last sent the ticket to review); its header
+describes the findings table. `interventions.md` separates rescues from routine
+approvals, proxy decisions and automatic recovery. Unknown history stays unknown.
 
 It prints the open tickets as a tree before and after every run, including runs
-it refuses and runs that crash. `/standup` renders the same tree for where things
-stand now; the log is what happened while nobody watched.
+it refuses and runs that crash.
 
 ## Starting one
 
@@ -225,23 +198,21 @@ Choosing the lineup:
 - The user spells out models ("luna max implements, opus 5.5 reviews"): pass them
   for this run only, in the lineup syntax:
   `-Models 'stage 2 gpt-6-luna max, stage 3 opus-5.5 high'`.
-- Neither: no flag, the default line.
+- Neither: no flag.
 
 Never edit `lineups.md` to run a lineup: it changes the default for every repo and
 every later run. A lineup worth keeping goes into `lineups.md` by a commit the
 user asked for.
 
-A Codex model may end in `fast` (`stage 2 gpt-6.1-sol high fast`): the stage runs
-on Codex's priority tier (`service_tier=fast`, the CLI's `/fast`) and logs as
-`gpt-6.1-sol-fast`, its own scoreboard row, priced at twice the base model's row.
-The response's own `service_tier` echo reads `default` even on fast; the proof is
-Codex's `RUST_LOG=codex_otel=info` line (`service_tier="priority"`) and the speed
-(measured 2026-10-04: ~50 tok/s fast against 22-29 standard).
+A Codex model may end in `fast` (`stage 2 gpt-6.1-sol high fast`): Codex's priority
+tier (`service_tier=fast`), logged as `gpt-6.1-sol-fast`, its own scoreboard row,
+priced at twice the base row. The response's `service_tier` echo reads `default`
+even on fast; the proof is Codex's `RUST_LOG=codex_otel=info` line
+(`service_tier="priority"`).
 
 Claude models carry their version (`opus-5.5`, `sonnet-5`, `fable-5.1`,
 `haiku-4.5`; `opus 5.5` reads the same). An unversioned `opus` is refused: an
-alias moves when a new model ships, and the lineup would change unannounced. See
-`lineups.md` for the current lines.
+alias moves when a new model ships. See `lineups.md` for the current lines.
 
 A mixed lineup needs both CLIs installed and logged in; the driver checks at start.
 
@@ -249,28 +220,25 @@ Any model id with a slash runs on OpenCode, written as `opencode models` lists i
 (`stage 2 opencode/big-pickle`), so any provider OpenCode reaches works with no
 driver change. A reasoning variant rides in the id (`openai/gpt-6-sol#high`); the
 effort word is not sent, because a variant the model lacks is refused. Each stage
-runs `opencode run --standalone --auto --format json`: its own server, so a
-timeout kill stops the agent, and `--auto` approves every permission the OpenCode
-config does not deny (a denied one stays denied). OpenCode reads no global
-`CLAUDE.md`, so its prompt names the skill (`Use the ticket-flow skill on <id>.`):
-`ticket-flow` and the skills it calls must be installed under
-`~/.config/opencode/skills/` as junctions (symlinks on Linux) to this repo, never copies (a copy
-measured 2026-10-27 was five weeks stale). The cost column is OpenCode's own price
-per step; subagent sessions are not counted. An unknown model or variant stops the
-run instead of retrying.
+runs in its own OpenCode server (so a timeout kill stops the agent), and `--auto`
+approves every permission the OpenCode config does not deny. OpenCode reads no
+global `CLAUDE.md`, so its prompt names the skill (`Use the ticket-flow skill on
+<id>.`): `ticket-flow` and the skills it calls must be installed under
+`~/.config/opencode/skills/` as junctions (symlinks on Linux) to this repo, never
+copies, which go stale. The cost column is OpenCode's own price per step;
+subagent sessions are not counted. An unknown model or variant stops the run
+instead of retrying.
 
 Codex stages run with `--dangerously-bypass-approvals-and-sandbox`: no sandbox
-and no approvals, so run the driver only on a machine set aside for the runs.
-The sandbox kept `.git` read-only on Windows, and on Linux it refused the gate's
-network and process calls and the proxy's `systemd-run`.
+and no approvals, so run the driver only on a machine set aside for the runs (the
+sandbox kept `.git` read-only and refused the gate's network and the proxy's
+`systemd-run`).
 
 The repo is the current one when its `AGENTS.md` carries the `## Bindings do
 fluxo` block; otherwise ask which. When asked to run, launch the selected script
 and show where its output lands. These are the corresponding commands:
 
-    & "<skills-dir>\sweatshop\scripts\sweatshop.ps1" "<repo>"
-    & "<skills-dir>\sweatshop\scripts\sweatshop.ps1" "<repo>" -Lineup opus
-    & "<skills-dir>\sweatshop\scripts\sweatshop.ps1" "<repo>" -Models 'stage 2 gpt-6-luna max, stage 3 opus-5.5 high'
+    & "<skills-dir>\sweatshop\scripts\sweatshop.ps1" "<repo>" [-Lineup opus | -Models '<line>']
     & "<skills-dir>\sweatshop\scripts\sweatshop-codex.ps1" "<repo>"
     & "<skills-dir>\sweatshop\scripts\sweatshop.ps1" "<repo>\.artifacts-build\lanes\flutter" -Lane flutter
 
@@ -294,16 +262,10 @@ session at all (published after it opened) parks the ticket `blocked` instead (4
   the clone; the foreman merges it.
 - **The clone starts from origin.** Push the base before starting lanes, or
   tickets committed only on the local base are missing.
-- **Lanes and lane-less runs never share a repo.** A run without `-Lane` refuses
-  while a lane session is open, and a lane refuses while a session without a lane
-  is open.
 - **Lanes should not edit the same files.** If they do, the later PR conflicts
-  with the base; the foreman's sync resolves it or hands it to the human. Choosing lanes is planning, not the driver's job; one lane runs its
-  tickets one at a time, so a chain that must stay serial stays in one lane.
-
-ticket-flow sessions take the open session that is an ancestor of HEAD
-(ticket-flow, Dispatch), so lanes need nothing else from them. Each lane gets
-its own `foreman`.
+  with the base; the foreman's sync resolves it or hands it to the human. Choosing
+  lanes is planning, not the driver's job; one lane runs its tickets one at a time,
+  so a chain that must stay serial stays in one lane.
 
 Run it in a background terminal/session: a foreground tool call can time out
 before a stage ends. Say where the output lands and end the turn. Do not poll
@@ -313,17 +275,10 @@ To pause a run, create `<tracker>/run-log/STOP`. The driver deletes it and ends
 between stages through its normal end: tree reset, session PR published, back on
 the base. Killing the process skips that end and can leave a stage half-written.
 
-The process belongs to the session that launched it. If that session dies,
+The process belongs to the session that launched it; if that session dies,
 Preflight may find a ticket at `implementing` and refuse the next run. A terminal
-the user owns can outlive the agent session; give them the line above when they
-ask to launch it themselves.
+the user owns outlives the agent session: give them the line above on request.
 
-Offer `-DryRun` (prints committed local state, session and first planned
-ticket/model; touches neither target nor source, refreshes no refs and discovers
-or authenticates no CLI) the first time a repo runs the loop. Local refs may be
-stale, which the preview states. `-SelfCheck` tests production functions in
-disposable fixtures without reading the supplied target. Both skip updates,
-target initialization and remote operations. `scripts/check.ps1` runs the full
-offline suite; it never launches the model pipeline. Its fake-runtime tests
-cover the proxy end to end: pings that reach and that do not, the driver
-answering asks until the third, receipts, and the test/production check.
+Offer `-DryRun` the first time a repo runs the loop (a preview; local refs may
+be stale, which it states). `scripts/check.ps1` runs the offline suite and never
+launches a model.
