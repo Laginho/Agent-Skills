@@ -322,6 +322,14 @@ Check 'reset frees a ticket branch held by a leftover stage worktree and keeps i
     Assert ((GitOk show "${ref}^3:attempt.txt") -eq 'uncommitted attempt') 'Uncommitted worktree work lost'
   } finally { Pop-Location }
 }
+Check 'test paths: suffix conventions count only for their languages' {
+  foreach ($f in 'app/src/soma.test.ts', 'src/soma.spec.js', 'lib/soma_test.dart', 'pkg/soma_test.go', 'app/soma_test.py', 'web/soma-test.js', 'tests/test_x.gd', 'test_x.gd') {
+    Assert ($f -match $TestFiles) "Test file read as production: $f"
+  }
+  foreach ($f in 'ui/pass_test.gd', 'scenes/pass_test.tscn', 'src/latest.ts', 'docs/contest.md') {
+    Assert ($f -notmatch $TestFiles) "Production file read as a test: $f"
+  }
+}
 Check 'a commit mixing test and production fails the handoff; split commits, metadata and listed fixtures pass' {
   Fixture testfirst; Push-Location $Repo
   try {

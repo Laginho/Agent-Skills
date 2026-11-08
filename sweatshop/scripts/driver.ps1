@@ -67,7 +67,9 @@ $Gate   = [regex]::Match($block, 'Gate:\s*`([^`]+)`').Groups[1].Value
 $Base   = [regex]::Match($block, 'Base branch:\s*`([^`]+)`').Groups[1].Value
 # What a test-only commit may touch. `Test files:` adds a repo's fixtures that live beside
 # production (EasyMath's shared JSON cases); the tracker is metadata, allowed in any commit.
-$TestFiles = '(?i)(^|/)(tests?|__tests__|__snapshots__|fixtures|integration_test|androidTest|e2e)/|[._-](test|spec)\.[^/.]+$|(^|/)test_[^/]+$'
+# A `_test`/`-test` suffix is a test only where the language uses it beside production
+# (Go, Dart, Python, JS/TS, Ruby, Elixir); P-Chess's production `ui/pass_test.gd` is not.
+$TestFiles = '(?i)(^|/)(tests?|__tests__|__snapshots__|fixtures|integration_test|androidTest|e2e)/|\.(test|spec)\.[^/.]+$|[_-](test|spec)\.(go|dart|py|js|jsx|mjs|cjs|ts|tsx|rb|exs)$|(^|/)test_[^/]+$'
 $extraTests = [regex]::Match($block, 'Test files:\s*`([^`]+)`').Groups[1].Value
 if ($extraTests) { $TestFiles += "|$extraTests" }
 # `opus 5.5` and `opus-5.5` both read as `opus-5.5`, the bench's label; effort is
