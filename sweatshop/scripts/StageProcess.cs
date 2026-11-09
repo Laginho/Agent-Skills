@@ -65,7 +65,7 @@ public sealed class SweatshopStageProcess : IDisposable
             // setsid keeps the driver's terminal signals off the stage, as CREATE_NO_WINDOW does.
             // A runaway gate dies inside its own scope instead of starving the desktop session (oomd, 2026-11-01).
             var unit = "sweatshop-stage-" + Guid.NewGuid().ToString("N") + ".scope";
-            var start = new ProcessStartInfo("setsid", "systemd-run --user --scope --quiet --collect -p MemoryMax=6G -p MemorySwapMax=1G --unit=" + unit +
+            var start = new ProcessStartInfo("setsid", "systemd-run --user --scope --quiet --collect -p MemoryHigh=5G -p MemoryMax=6G -p MemorySwapMax=4G --unit=" + unit +
                 " sh -c \"" + Launcher.Replace("\"", "\\\"") + "\" sweatshop-stage \"" + log + "\" " + Process.GetCurrentProcess().Id + " \"" + exe + "\" " + args);
             start.UseShellExecute = false; start.WorkingDirectory = cwd;
             owner.unix = Process.Start(start); owner.Id = owner.unix.Id;

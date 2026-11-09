@@ -124,8 +124,8 @@ lines; Claude ids are pinned to a version.
 - Each CLI launches suspended into its own Windows Job Object before running.
   Normal exit, a ten-second grace after a terminal runtime event, or the stage
   time limit (below) closes that job and its descendants. On Linux (`pwsh` 7) the job is a
-  transient systemd user scope capped at 6 GB of RAM and 1 GB of swap (a runaway gate is
-  OOM-killed inside it, not the desktop session): its cgroup keeps descendants that start a new
+  transient systemd user scope throttled above 5 GB of RAM, with up to 4 GB of swap, and killed
+  only at 6 GB (a runaway gate is OOM-killed inside it, not the desktop session): its cgroup keeps descendants that start a new
   session (Codex does, per tool command), they get SIGTERM, then `cgroup.kill`
   after 3 s, and a watchdog in the scope kills it if the driver dies. A Linux
   driver therefore needs a systemd user session (`systemd-run --user`). Existing shared services are not
