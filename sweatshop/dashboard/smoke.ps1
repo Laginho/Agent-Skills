@@ -19,7 +19,7 @@ function StatusOf($call) { try { & $call | Out-Null; 200 } catch { [int]$_.Excep
 $mark = "smoke $([guid]::NewGuid().ToString('N').Substring(0, 8))"
 $at = (Get-Date).ToUniversalTime().ToString('o')
 $snap = @{ project = 'smoke'; lane = 'main'; pc = [Environment]::MachineName; foreman = 'smoke'; session = 'smoke'
-           driver = 'finished'; current = $null; tickets = @(); needsHuman = @(); events = @(@{ at = $at; text = $mark })
+           driver = 'finished'; current = $null; tickets = @(); needsHuman = @(); foremanQueue = @(); events = @(@{ at = $at; text = $mark })
            pr = $null; costToday = '$0.000'; updatedAt = $at } | ConvertTo-Json -Depth 5
 # Bytes, not a string: PS 5.1 would send a string body as ISO-8859-1.
 $post = @{ Method = 'Post'; Uri = "$Url/api/lane"; Body = [Text.Encoding]::UTF8.GetBytes($snap)

@@ -1086,10 +1086,20 @@ Progress: chapter 1 of 3", 'to-implement', '1/3'),
   if ("$($dt.id)|$($dt.title)|$($dt.state)|$($dt.note)" -ne 'APP-7|Login screen|blocked|2026-11-01 Proxy escalated: font') { throw "DashTicket: $($dt | ConvertTo-Json -Compress)" }
   $dt = DashTicket ([pscustomobject]@{ Id = 'APP-8'; Stage = 'to-implement'; Text = "# APP-8 $([char]0x2014) Next"; LastComment = '- x' })
   if ($dt.title -ne 'Next' -or $dt.note) { throw "DashTicket: $($dt | ConvertTo-Json -Compress)" }
-  $all = @([pscustomobject]@{ Id = 'R-1'; Stage = 'to-implement'; BlockedBy = @() }, [pscustomobject]@{ Id = 'R-2'; Stage = 'blocked'; BlockedBy = @('R-1') },
-           [pscustomobject]@{ Id = 'R-3'; Stage = 'blocked'; BlockedBy = @('R-0') }, [pscustomobject]@{ Id = 'R-0'; Stage = 'done'; BlockedBy = @() })
-  $nh = (DashNeedsHuman @(@{ id = 'R-1'; state = 'to-implement' }, @{ id = 'R-2'; state = 'blocked' }, @{ id = 'R-3'; state = 'blocked' }) $all | ForEach-Object { $_.id }) -join ','
-  if ($nh -ne 'R-3') { throw "DashNeedsHuman: a blocked ticket behind open work is not the human's ($nh)" }
+  $all = @([pscustomobject]@{ Id = 'R-0'; Stage = 'done'; BlockedBy = @(); LastComment = '' },
+           [pscustomobject]@{ Id = 'R-1'; Stage = 'to-implement'; BlockedBy = @(); LastComment = '' },
+           [pscustomobject]@{ Id = 'R-2'; Stage = 'blocked'; BlockedBy = @('R-1'); LastComment = '- 2026-11-01 Proxy escalated: x' },
+           [pscustomobject]@{ Id = 'R-3'; Stage = 'blocked'; BlockedBy = @('R-0'); LastComment = '- Second reopen: foreman diagnosis required' },
+           [pscustomobject]@{ Id = 'R-4'; Stage = 'blocked'; BlockedBy = @(); LastComment = '- 2026-11-01 Proxy escalated: font' },
+           [pscustomobject]@{ Id = 'R-5'; Stage = 'blocked'; BlockedBy = @(); LastComment = '- Stage stopped (timeout): two attempts' },
+           [pscustomobject]@{ Id = 'R-6'; Stage = 'invalid-handoff'; BlockedBy = @(); LastComment = '' },
+           [pscustomobject]@{ Id = 'R-7'; Stage = 'to-merge'; BlockedBy = @(); LastComment = '' })
+  $q = DashQueues @($all | ForEach-Object { [pscustomobject]@{ id = $_.Id; state = $_.Stage } }) $all
+  $nh = @($q.needsHuman | ForEach-Object { $_.id }) -join ','
+  $fq = @($q.foremanQueue | ForEach-Object { $_.id }) -join ','
+  # A dependency wait (R-2) is in neither, even with a proxy escalation; a blocked behind done (R-3) is the foreman's.
+  if ($nh -ne 'R-4,R-7') { throw "DashQueues needsHuman: ($nh)" }
+  if ($fq -ne 'R-3,R-5,R-6') { throw "DashQueues foremanQueue: ($fq)" }
   $runLog = "| When | ID | Stage | Model | Attempt | Outcome | Session | Took | Tokens | Cost | Shutdown s |`n|---|---|---|---|---|---|---|---|---|---|---|`n| 2026-11-01 10:00 | A-1 | implement | m x | 1 | to-review | s | 5m | 1k in | `$0.500 | ? |`n" +
             "| 2026-11-01 11:00 | A-1 | review | m x | 1 | merged | s | 5m | ? | ? | ? |`n| 2026-10-31 23:50 | A-0 | review | m x | 1 | merged | s | 5m | 1k in | `$9.000 | 1 |"
   if ((DashCost $runLog '2026-11-01') -ne ([string][char]0x2265 + '$0.500')) { throw "DashCost: $(DashCost $runLog '2026-11-01')" }

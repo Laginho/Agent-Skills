@@ -4,6 +4,7 @@
 //   { project, lane, pc, foreman, session, driver: 'running|finished|stopped|crashed',
 //     current: null | { id, title, stage, model, startedAt: '<UTC ISO>', limitMin },
 //     tickets: [{ id, title, state, note }], needsHuman: [{ id, title, state, note }],
+//     foremanQueue: [{ id, title, state, note }] (absent in snapshots from before it),
 //     events: [{ at: '<ISO>', text }], pr: '<url>' | null, costToday: '$1.234' | '≥$1.234',
 //     updatedAt: '<ISO>' }
 // One secret: WRITE_TOKEN (the driver's bearer token); unset refuses every write.
@@ -82,6 +83,7 @@ const PAGE = `<!doctype html>
   .tag { font-size: 12px; color: var(--dim); border: 1px solid var(--line); border-radius: 4px; padding: 0 6px; }
   .state { font-size: 12px; font-weight: 600; }
   .running { color: var(--ok); } .bad { color: var(--bad); } .ended { color: var(--off); } .need { color: var(--warn); }
+  .fore { color: var(--off); }
   .dim { color: var(--dim); }
   h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--dim); margin: 12px 0 4px; }
   ul { margin: 0; padding-left: 18px; }
@@ -135,6 +137,7 @@ function card(l) {
                el('div', 'dim', [c.stage, c.model, mins(data.now - Date.parse(c.startedAt)) + ' of ' + c.limitMin + 'm'].join(' · ')));
   }
   if (needs(l)) box.append(el('h3', 'need', 'Needs you'), el('ul', null, l.needsHuman.map(ticketItem)));
+  if ((l.foremanQueue || []).length) box.append(el('h3', 'fore', 'Foreman'), el('ul', null, l.foremanQueue.map(ticketItem)));
   if ((l.tickets || []).length) box.append(el('h3', null, 'Tickets'), el('ul', null, l.tickets.map(ticketItem)));
   if ((l.events || []).length) {
     box.append(el('h3', null, 'Events'),

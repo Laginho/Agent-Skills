@@ -9,7 +9,7 @@ $DashOn = [bool]($DashUrl -and $DashToken)
 $DashEvery = [timespan]::FromMinutes(2)
 $DashEvents = [Collections.Generic.List[object]]::new()
 $DashSnap = $null; $DashFailing = $false; $DashLastPost = [datetime]::MinValue
-# Waiting on a human: the lane's needsHuman, and the tickets whose note the card shows.
+# The tickets whose note the card shows: the ones a human or the foreman is waited on for.
 $DashHuman = 'blocked', 'to-merge', 'invalid-handoff'
 # Every Invoke-StageProcess in this process ticks, the proxy's calls included: a 30-minute
 # proxy answer must not read as a dead lane.
@@ -32,12 +32,19 @@ function DashTicket($t) {
   [ordered]@{ id = $t.Id; title = $title; state = $t.Stage; note = Clip $note 300 }
 }
 
-# Waiting on a human, not on work: a `blocked` ticket whose blockers are not all done is a
-# dependency wait (a human ticket queued behind agent work), so it stays off "Needs you".
-function DashNeedsHuman($tickets, $all) {
+# Who a ticket waits on. "Needs you": a `to-merge` (Review: human lands there too), or a
+# `blocked` whose last comment is a proxy escalation. "Foreman": every other `blocked` (a
+# second-reopen diagnosis, a timeout park, an ask the proxy has not answered) and
+# `invalid-handoff`. A `blocked` behind unfinished blockers is a dependency wait: in neither.
+function DashQueues($tickets, $all) {
   $doneIds = @($all | Where-Object Stage -eq 'done' | ForEach-Object Id)
   $waiting = @($all | Where-Object { $_.Stage -eq 'blocked' -and ($_.BlockedBy | Where-Object { $_ -notin $doneIds }) } | ForEach-Object Id)
-  @($tickets | Where-Object { $_.state -in $DashHuman -and $_.id -notin $waiting })
+  $escalated = @($all | Where-Object { $_.Stage -eq 'blocked' -and "$($_.LastComment)" -match 'Proxy escalated' } | ForEach-Object Id)
+  $live = @($tickets | Where-Object { $_.id -notin $waiting })
+  [ordered]@{
+    needsHuman   = @($live | Where-Object { $_.state -eq 'to-merge' -or $_.id -in $escalated })
+    foremanQueue = @($live | Where-Object { $_.state -in 'blocked', 'invalid-handoff' -and $_.id -notin $escalated })
+  }
 }
 
 # Today's spend: the priced Cost cells of today's run-log rows (local date, as the rows are),
@@ -62,18 +69,20 @@ function Report-Dash($driver = 'running', $current = $null) {
   if (-not $script:DashProject) { $script:DashProject = try { RepoName (GitOk remote get-url origin) } catch { Split-Path $Repo -Leaf } }
   $tickets = if ($script:DashSnap) { $script:DashSnap.tickets }
   $needs = if ($script:DashSnap) { $script:DashSnap.needsHuman }
+  $foreman = if ($script:DashSnap) { $script:DashSnap.foremanQueue }
   try {
     $all = @(AllTickets)
     $open = @($all | Where-Object { $_.Stage -ne 'done' -and (InLane $_) })
     $done = @(CompletedTickets | Where-Object { InLane $_ })
     $tickets = @(@($open) + @($done) | ForEach-Object { DashTicket $_ })
-    $needs = DashNeedsHuman $tickets $all
+    $queues = DashQueues $tickets $all
+    $needs = $queues.needsHuman; $foreman = $queues.foremanQueue
   } catch { Write-Host ("[{0}] dashboard: ticket list unavailable, keeping the last one: {1}" -f (Get-Date -Format HH:mm:ss), $_.Exception.Message) }
   $cost = try { DashCost (Read-StageLog $RunLog) (Get-Date -Format yyyy-MM-dd) } catch { $null }
   $script:DashSnap = [ordered]@{
     project = $script:DashProject; lane = $(if ($Lane) { $Lane } else { 'main' }); pc = [Environment]::MachineName
     foreman = $env:SWEATSHOP_FOREMAN; session = $Loop; driver = $driver; current = $current
-    tickets = @($tickets); needsHuman = @($needs)
+    tickets = @($tickets); needsHuman = @($needs); foremanQueue = @($foreman)
     events = @(); pr = $script:PrUrl; costToday = $cost; updatedAt = $null
   }
   Send-Dash
