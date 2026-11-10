@@ -10,7 +10,7 @@ function Enter-GateSlot([int]$Slots = 0) {
   $waiting = $false
   while ($true) {
     foreach ($i in 0..($Slots - 1)) {
-      $m = New-Object System.Threading.Mutex($false, "gate-lock-slot-$i")
+      $m = New-Object System.Threading.Mutex($false, "Global\gate-lock-slot-$i")
       try { if ($m.WaitOne(0)) { return $m } }
       catch [System.Threading.AbandonedMutexException] { return $m }  # previous holder died: slot is ours
       $m.Dispose()

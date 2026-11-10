@@ -265,8 +265,10 @@ Check 'ticket gate waits for a free machine gate slot' {
     WriteTicket T-1 to-implement; StartSession
     $log = Join-Path $root 'slot.log'; $receipt = Join-Path $root 'slot.json'; $held = Join-Path $root 'slot-held'
     # Another process holds the only slot for 8 s, as a PR gate or another lane's gate would.
-    $holder = "`$m = New-Object System.Threading.Mutex(`$false, 'gate-lock-slot-0'); `$null = `$m.WaitOne(); Set-Content '$held' x; Start-Sleep 8; `$m.ReleaseMutex()"
-    $p = Start-Process $PowerShellExe -ArgumentList '-NoProfile', '-Command', $holder -PassThru -WindowStyle Hidden
+    $holder = "`$m = New-Object System.Threading.Mutex(`$false, 'Global\gate-lock-slot-0'); `$null = `$m.WaitOne(); Set-Content '$held' x; Start-Sleep 8; `$m.ReleaseMutex()"
+    # Linux: from another session (setsid), as a detached lane's gate would be.
+    $p = if ($IsLinux) { Start-Process setsid -ArgumentList '-w', $PowerShellExe, '-NoProfile', '-Command', $holder -PassThru }
+         else { Start-Process $PowerShellExe -ArgumentList '-NoProfile', '-Command', $holder -PassThru -WindowStyle Hidden }
     $deadline = (Get-Date).AddSeconds(30); while (-not (Test-Path $held) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 200 }
     $runner = Join-Path $PSScriptRoot 'gate-evidence.ps1'
     $wait = Measure-Command { & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File $runner -Repo $Repo -Command 'Write-Output green' -Log $log -Receipt $receipt -Slots 1 *> (Join-Path $root 'gate-slot-transcript.log') }

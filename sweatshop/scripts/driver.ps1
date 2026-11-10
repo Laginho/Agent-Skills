@@ -54,7 +54,7 @@ function Say($m) { Write-Host ("[{0}] {1}" -f (Get-Date -Format HH:mm:ss), $m); 
 # Runs in parallel on other repos share this machine. A named mutex dies with its
 # process, so a killed run never leaves one held. $null when $ms runs out.
 function Lock($name, $ms) {
-  $m = [Threading.Mutex]::new($false, $name)
+  $m = [Threading.Mutex]::new($false, "Global\$name")  # Global\: on Linux an unprefixed name is per session, and every detached driver or shell has its own
   try { if (-not $m.WaitOne($ms)) { $m.Dispose(); return $null } } catch [Threading.AbandonedMutexException] { }
   $m
 }
@@ -1077,7 +1077,9 @@ Progress: chapter 1 of 3", 'to-implement', '1/3'),
   if ($leak.Count) { throw "GitOk: stderr leaked into output: $($leak -join ' / ')" }
   # Lock is all that keeps two drivers off one repo: a second process must not get it.
   $l = Lock "sweatshop-selfcheck-$PID" 0
-  $other = & $PowerShellExe -NoProfile -Command "[Threading.Mutex]::new(`$false, 'sweatshop-selfcheck-$PID').WaitOne(0)"
+  # In another session on Linux (setsid), where a name without Global\ would not be seen.
+  $probe = "[Threading.Mutex]::new(`$false, 'Global\sweatshop-selfcheck-$PID').WaitOne(0)"
+  $other = if ($IsLinux) { & setsid -w $PowerShellExe -NoProfile -Command $probe } else { & $PowerShellExe -NoProfile -Command $probe }
   $l.ReleaseMutex(); $l.Dispose()
   if ("$other" -ne 'False') { throw "Lock: a second process got it ($other)" }
   # Dashboard: the card's ticket, today's cost, a heartbeat throttled to its interval, and

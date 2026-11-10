@@ -15,7 +15,7 @@ $before = $null; $after = $null
 # Both diagnostic modes must be safe in dirty/offline checkouts and need no CLIs.
 if ($SelfCheck) { & (Join-Path $PSScriptRoot 'driver-selfcheck.ps1'); return }
 if (-not ($DryRun -or $SelfCheck)) {
-  $mutex = [Threading.Mutex]::new($false, 'sweatshop-self-update')
+  $mutex = [Threading.Mutex]::new($false, 'Global\sweatshop-self-update')
   try {
     try { $null = $mutex.WaitOne() } catch [Threading.AbandonedMutexException] { }
     $ErrorActionPreference = 'Continue'

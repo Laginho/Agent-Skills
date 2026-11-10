@@ -30,7 +30,7 @@ folder with an `issues/` directory; the first that fails is its reason.
 3. **Not running.** The lane's clone is `.artifacts-build/lanes/<folder>` (the
    repo's binding may say otherwise). Its driver holds a named mutex while it runs:
 
-       if (Test-Path <clone>) { Set-Location <clone>; $n = 'sweatshop-repo-' + ((Get-Location).Path.ToLower() -replace '[\\/:]', '_'); try { [Threading.Mutex]::OpenExisting($n).Dispose(); 'running' } catch { 'idle' } } else { 'idle' }
+       if (Test-Path <clone>) { Set-Location <clone>; $n = 'Global\sweatshop-repo-' + ((Get-Location).Path.ToLower() -replace '[\\/:]', '_'); try { [Threading.Mutex]::OpenExisting($n).Dispose(); 'running' } catch { 'idle' } } else { 'idle' }
 
    A lane-less driver shows the same way with the main checkout as the path.
 4. **Work ready.** Read tickets as `standup` does (loop's base, ticket branches via
