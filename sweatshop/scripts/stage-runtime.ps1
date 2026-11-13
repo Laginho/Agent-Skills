@@ -27,7 +27,8 @@ function Test-StageCompleted($Text, $Runtime) {
     try { return ($Text | ConvertFrom-Json).type -eq 'result' } catch { return $false }
   }
   foreach ($line in $Text -split "`n") {
-    try { if (($line | ConvertFrom-Json).type -eq 'turn.completed') { return $true } } catch { }
+    # Codex ends a turn with `turn.completed`; Antigravity's stream-json ends with `"event":"result"`.
+    try { $e = $line | ConvertFrom-Json; if ($e.type -eq 'turn.completed' -or $e.event -eq 'result') { return $true } } catch { }
   }
   return $false
 }
@@ -45,8 +46,8 @@ function Invoke-StageProcess($Exe, $Arguments, $WorkingDirectory, $Log, $Runtime
     do {
       # OpenCode has no terminal event: its exit is the completion, so skip reading its large log.
       if (-not $completed -and $Runtime -ne 'OpenCode') {
-        # Claude emits one JSON object, Codex JSONL. Read the whole Claude result.
-        $tail = if ($Runtime -eq 'Codex') { 65536 } else { 0 }
+        # Claude emits one JSON object, Codex and Antigravity JSONL. Read the whole Claude result.
+        $tail = if ($Runtime -in 'Codex', 'Antigravity') { 65536 } else { 0 }
         if (Test-StageCompleted (Read-StageLog $Log $tail) $Runtime) { $completed = [datetime]::UtcNow }
       }
       if ($owner.HasExited) { $exited = [datetime]::UtcNow; $code = $owner.ExitCode; $result = "exit $code"; break }
@@ -84,14 +85,16 @@ function Invoke-StageProcess($Exe, $Arguments, $WorkingDirectory, $Log, $Runtime
 # --- runtimes: shared by the driver and proxy.ps1 -----------------------------------
 # The runtime follows the model, so one lineup can pair a Codex implementer with a Claude reviewer.
 # ponytail: a name prefix; give the binding a runtime column if a family ever runs on both.
-# OpenCode ids are `provider/model`; no Claude or Codex name has a slash.
-function RuntimeOf($model) { if ($model -match '/') { 'OpenCode' } elseif ($model -match '^gpt-') { 'Codex' } else { 'Claude' } }
+# OpenCode ids are `provider/model`; no Claude or Codex name has a slash. Gemini runs on the
+# Antigravity CLI (`agy`), signed in to the Google account's Antigravity plan.
+function RuntimeOf($model) { if ($model -match '/') { 'OpenCode' } elseif ($model -match '^gpt-') { 'Codex' } elseif ($model -match '^gemini-') { 'Antigravity' } else { 'Claude' } }
 # What `claude --model` takes: `opus-5.5` is `claude-opus-5-5`. Codex names pass as written.
 function CliModel($model) { if ($model -match '^(gpt-|claude-)') { $model } else { 'claude-' + ($model -replace '\.', '-') } }
 function FindCli($runtime) {
+  $name = if ($runtime -eq 'Antigravity') { 'agy' } else { $runtime.ToLower() }
   $probe = if (-not $OnWindows) {
     # Native installers put the CLI in ~/.local/bin, which a service's PATH may lack.
-    "$HOME/.local/bin/$($runtime.ToLower())"
+    "$HOME/.local/bin/$name"
     if ($runtime -eq 'OpenCode') { "$HOME/.opencode/bin/opencode" }
   } elseif ($runtime -eq 'Claude') {
     # `claude` may not be on PATH: probe the installs the app and the CLI use.
@@ -99,6 +102,9 @@ function FindCli($runtime) {
     "$env:USERPROFILE\AppData\Roaming\Claude\claude-code\*\claude.exe"
     "$env:USERPROFILE\.local\bin\claude.exe"
     "$env:APPDATA\npm\claude.cmd"
+  } elseif ($runtime -eq 'Antigravity') {
+    # shortcut: guessed from the Linux installer's ~/.local/bin; unchecked on Windows.
+    "$env:USERPROFILE\.local\bin\agy.exe"
   } elseif ($runtime -eq 'OpenCode') {
     "$env:APPDATA\npm\opencode.cmd"
     "$env:USERPROFILE\.opencode\bin\opencode.exe"
@@ -107,7 +113,7 @@ function FindCli($runtime) {
     "$env:LOCALAPPDATA\OpenAI\Codex\bin\*\codex.exe"
     "$env:APPDATA\npm\codex.cmd"
   }
-  $exe = (Get-Command $runtime.ToLower() -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+  $exe = (Get-Command $name -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
   if (-not $exe) {
     $exe = $probe | ForEach-Object { Get-ChildItem $_ -ErrorAction SilentlyContinue } |
       Sort-Object { try { [version]$_.Directory.Name } catch { [version]"0.0.0" } } |
@@ -121,6 +127,14 @@ function OpenCodeFinal($text) {
   $last = ''
   foreach ($l in $text -split "`n") {
     if ($l -like '{"type":"text"*') { try { $last = ($l | ConvertFrom-Json).part.text } catch { } }
+  }
+  $last
+}
+# Antigravity's stream-json ends with one `result` event whose `response` is the last message.
+function AntigravityFinal($text) {
+  $last = ''
+  foreach ($l in $text -split "`n") {
+    if ($l -like '*"event":"result"*') { try { $last = ($l | ConvertFrom-Json).result.response } catch { } }
   }
   $last
 }

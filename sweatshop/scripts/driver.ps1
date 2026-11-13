@@ -323,6 +323,11 @@ function StageArgs($rt, $model, $effort, $prompt, $title, $final) {
     # none), so it rides in the model id. It reads no global CLAUDE.md, so the bare-id
     # rule is not there: name the skill (routing, not behaviour; measured 2026-10-27).
     "run --standalone --auto --format json --model $model --title `"$title`" `"$prompt`""
+  } elseif ($rt -eq 'Antigravity') {
+    # The effort rides in the slug (`gemini-4-hydrogen-xhigh`, as `agy models` lists it): an
+    # unknown one is refused, never downgraded. No sandbox and no prompts, as Codex runs.
+    # stream-json, not json: the log grows while the stage runs and ends with a `result` event.
+    "-p `"$prompt`" --model $model-$effort --output-format stream-json --dangerously-skip-permissions"
   } else {
     # No sandbox: on Linux bwrap refused the gate's network and process calls and the
     # proxy's systemd-run, and on Windows it kept .git read-only (measured 2026-10-02,
@@ -335,7 +340,8 @@ function StageArgs($rt, $model, $effort, $prompt, $title, $final) {
 function RunStage($t, $model, $effort, $minutes, $label) {
   $log = Join-Path $RunDir ("{0}-{1}-{2}.txt" -f $t.Id, $label, (Get-Date -Format yyyyMMdd-HHmmss))
   $rt = RuntimeOf $model; $exe = $Cli[$rt]
-  $prompt = if ($rt -eq 'OpenCode') { "Use the ticket-flow skill on $($t.Id)." } else { $t.Id }
+  # OpenCode and Antigravity read no global CLAUDE.md, so the prompt names the skill.
+  $prompt = if ($rt -in 'OpenCode', 'Antigravity') { "Use the ticket-flow skill on $($t.Id)." } else { $t.Id }
   $cliArgs = StageArgs $rt $model $effort $prompt "$($t.Id) $label" "$log.final"
   Say "$($t.Id) $label ($model $effort, ${minutes}m) -> $log"
   if ($DryRun) { Say "$exe $cliArgs"; return 'dry-run' }
@@ -360,6 +366,7 @@ function RunStage($t, $model, $effort, $minutes, $label) {
       if ($j) { [IO.File]::WriteAllText("$log.final", "$($j.result)") }
     }
     if ($rt -eq 'OpenCode') { [IO.File]::WriteAllText("$log.final", (OpenCodeFinal (Read-StageLog $log))) }
+    if ($rt -eq 'Antigravity') { [IO.File]::WriteAllText("$log.final", (AntigravityFinal (Read-StageLog $log))) }
     $script:LastUsage = Usage $log $model
     if ($null -ne $run.ExitCode -and $run.ExitCode -ne 0 -and ($rt -ne 'Claude' -or -not $j -or $j.num_turns -le 1)) {
       Add-Content $log "`nAPI Error: $rt exited $($run.ExitCode)`n$(Read-StageLog "$log.err")"
@@ -488,6 +495,18 @@ function Usage($log, $model) {
     return [pscustomobject]@{ In = (Sum $t 'input') + $cached + (Sum $c 'write'); Cached = $cached
                               Out = (Sum $t 'output') + (Sum $t 'reasoning'); Cost = Sum $s 'cost' }
   }
+  if ((RuntimeOf $model) -eq 'Antigravity') {
+    # Each finished step reports its usage; summing them also prices a stage killed before `result`.
+    # `input_tokens` excludes cache reads, and `total_tokens` is input plus output, so thinking is
+    # inside `output_tokens` (measured 2026-11-13, agy 1.5.8).
+    # shortcut: no cost; the plan bills Antigravity, and Google lists no API price for these slugs.
+    $s = @(foreach ($l in $text -split "`n") {
+      if ($l -like '*"event":"step_update"*"usage"*') { try { ($l | ConvertFrom-Json).step_update.usage } catch { } }
+    })
+    if (-not $s) { return $null }
+    $cached = Sum $s 'cache_read_tokens'
+    return [pscustomobject]@{ In = (Sum $s 'input_tokens') + $cached; Cached = $cached; Out = Sum $s 'output_tokens'; Cost = $null }
+  }
   if ((RuntimeOf $model) -eq 'Claude') {
     try { $j = $text | ConvertFrom-Json } catch { return $null }
     $m = @($j.modelUsage.PSObject.Properties | ForEach-Object Value)   # every model, subagents included
@@ -556,6 +575,9 @@ function Refused($log) {
   if ($m.Success) { return $m.Groups[1].Value }
   # OpenCode's unknown model or variant (measured 2026-10-27): a typo, never an outage.
   $m = [regex]::Match($text, '"provider\.no-route","message":"(.+?)"')
+  if ($m.Success) { return $m.Groups[1].Value }
+  # Antigravity's unknown model or effort slug (measured 2026-11-13, agy 1.5.8).
+  $m = [regex]::Match($text, '(model \S+ is not recognized as a known model)')
   if ($m.Success) { $m.Groups[1].Value }
 }
 # ponytail: only the "at h:mm AM" shape waits; a dated reset (weekly limit) still stops the run.
@@ -987,8 +1009,11 @@ Progress: chapter 1 of 3", 'to-implement', '1/3'),
   if ($null -ne (Refused $tmp)) { throw 'Refused: a capacity error is an outage' }
   [IO.File]::WriteAllText($tmp, "{`"type`":`"error`",`"timestamp`":1,`"sessionID`":`"ses_x`",`"error`":{`"type`":`"provider.no-route`",`"message`":`"Model unavailable: nope/nothing`"}}`n`nAPI Error: OpenCode exited 1`n")
   if ((Refused $tmp) -ne 'Model unavailable: nope/nothing') { throw "Refused: OpenCode no-route got $(Refused $tmp)" }
+  # Antigravity's unknown slug, as agy 1.5.8 wrote it on 2026-11-13.
+  [IO.File]::WriteAllText($tmp, '{"event":"result","result":{"conversation_id":"","status":"ERROR","response":"","error":"invalid model selection (--model \"nope-xhigh\" --effort \"\"): model nope-xhigh is not recognized as a known model or custom model in settings\nAvailable models:"}}' + "`n")
+  if ((Refused $tmp) -ne 'model nope-xhigh is not recognized as a known model') { throw "Refused: Antigravity slug got $(Refused $tmp)" }
   # A mixed lineup routes each stage by its model; a wrong route runs the wrong CLI.
-  foreach ($case in @(@('gpt-6-luna', 'Codex'), @('gpt-6-sol', 'Codex'), @('opus', 'Claude'), @('claude-opus-5-5', 'Claude'), @('sonnet', 'Claude'), @('opencode/big-pickle', 'OpenCode'), @('openai/gpt-6-sol', 'OpenCode'))) {
+  foreach ($case in @(@('gpt-6-luna', 'Codex'), @('gpt-6-sol', 'Codex'), @('opus', 'Claude'), @('claude-opus-5-5', 'Claude'), @('sonnet', 'Claude'), @('opencode/big-pickle', 'OpenCode'), @('openai/gpt-6-sol', 'OpenCode'), @('gemini-4-hydrogen', 'Antigravity'))) {
     if ((RuntimeOf $case[0]) -ne $case[1]) { throw "RuntimeOf: $($case[0]) should run on $($case[1])" }
   }
   # The binding's spelling, the run log's label and the CLI's id must stay one model.
@@ -1000,6 +1025,8 @@ Progress: chapter 1 of 3", 'to-implement', '1/3'),
   if ($null -ne (StageModel 'stage 2 opus-5.5' 3)) { throw 'StageModel: an absent stage must be $null' }
   $l = 'stage 2 opencode/big-pickle, stage 3 OpenRouter/Qwen-4#high max'
   if ("$(StageModel $l 2) / $(StageModel $l 3)" -ne 'opencode/big-pickle high / OpenRouter/Qwen-4#high max') { throw "StageModel: OpenCode $(StageModel $l 2) / $(StageModel $l 3)" }
+  if ("$(StageModel 'stage 2 gemini-4-hydrogen xhigh, stage 3 gpt-6.1-sol xhigh' 2)" -ne 'gemini-4-hydrogen xhigh') { throw 'StageModel: Antigravity' }
+  if ((StageArgs 'Antigravity' 'gemini-4-hydrogen' 'xhigh' 'Use the ticket-flow skill on T-1.' 't' 'f') -notmatch '--model gemini-4-hydrogen-xhigh --output-format stream-json') { throw 'StageArgs: Antigravity slug' }
   # A hard ticket, by its header or by two reopens, gets the `hard` implementer; nothing else does.
   if ("$(StageModel 'stage 2 gpt-6.1-sol high, hard sonnet-5.5 xhigh, stage 3 gpt-6.1-sol max' 'hard')" -ne 'sonnet-5.5 xhigh') { throw 'StageModel: hard' }
   $Model2, $Effort2, $ModelHard, $EffortHard = 'easy', 'high', 'strong', 'xhigh'
@@ -1032,6 +1059,17 @@ Progress: chapter 1 of 3", 'to-implement', '1/3'),
   if ((OpenCodeFinal (Read-StageLog $tmp)) -ne 'Which one?') { throw 'OpenCodeFinal: not the last text' }
   [IO.File]::WriteAllText($tmp, '{"type":"error","error":{"type":"provider.no-route","message":"x"}}')
   if ($null -ne (Usage $tmp 'opencode/big-pickle')) { throw 'Usage: OpenCode without steps must read ?' }
+  # Antigravity: usage per finished step, cache reads outside input, no price. Shape: agy 1.5.8, 2026-11-13.
+  [IO.File]::WriteAllText($tmp, (@('{"event":"init","conversation_id":"c"}',
+    '{"event":"step_update","step_update":{"step_index":1,"state":"DONE","step_type":"agent_response","usage":{"input_tokens":8988,"output_tokens":108,"thinking_tokens":58,"cache_read_tokens":0,"total_tokens":9096}}}',
+    '{"event":"step_update","step_update":{"step_index":2,"state":"DONE","step_type":"tool","tool_name":"run_command"}}',
+    '{"event":"step_update","step_update":{"step_index":3,"state":"DONE","step_type":"agent_response","usage":{"input_tokens":2253,"output_tokens":160,"thinking_tokens":78,"cache_read_tokens":6934,"total_tokens":2413}}}',
+    '{"event":"result","result":{"conversation_id":"c","status":"SUCCESS","response":"Which one?\n","usage":{"input_tokens":11241}}}') -join "`n"))
+  $u = Usage $tmp 'gemini-4-hydrogen'
+  if ("$($u.In) $($u.Cached) $($u.Out) $($u.Cost)" -ne '18175 6934 268 ') { throw "Usage: Antigravity $u" }
+  if ((UsageCells $u)[1] -ne '?') { throw 'Usage: Antigravity has no price' }
+  if ((AntigravityFinal (Read-StageLog $tmp)) -ne "Which one?`n") { throw 'AntigravityFinal: not the result response' }
+  if (-not (Test-StageCompleted (Read-StageLog $tmp) 'Antigravity')) { throw 'Test-StageCompleted: Antigravity result event' }
   Remove-Item $tmp
   # Killed stage (no turn.completed) priced from its rollout; subagent rollouts at any depth add to it.
   $codexHome = Join-Path ([IO.Path]::GetTempPath()) ('sweatshop-codexhome-' + [guid]::NewGuid().ToString('N'))

@@ -1,6 +1,6 @@
 ---
 name: sweatshop
-description: The unattended ticket-flow driver — runs fresh Claude Code, Codex or OpenCode CLI sessions, one stage at a time, and collects merged tickets in one session PR. Use when asked to start the driver ("roda o loop", "start the unattended run", "/sweatshop"), or to explain its run log or PR.
+description: The unattended ticket-flow driver — runs fresh Claude Code, Codex, OpenCode or Antigravity CLI sessions, one stage at a time, and collects merged tickets in one session PR. Use when asked to start the driver ("roda o loop", "start the unattended run", "/sweatshop"), or to explain its run log or PR.
 ---
 
 # Sweatshop
@@ -228,6 +228,17 @@ global `CLAUDE.md`, so its prompt names the skill (`Use the ticket-flow skill on
 copies, which go stale. The cost column is OpenCode's own price per step;
 subagent sessions are not counted. An unknown model or variant stops the run
 instead of retrying.
+
+A `gemini-*` id runs on the Antigravity CLI (`agy`), signed in once by hand (run
+`agy` and pick Google OAuth; it keeps the login in the desktop keyring, so the
+driver must run in the user's session). The effort joins the id into the slug
+`agy models` lists (`stage 2 gemini-4-hydrogen xhigh` runs
+`gemini-4-hydrogen-xhigh`); an unknown slug stops the run. Each stage is `agy -p`
+with `--output-format stream-json` and `--dangerously-skip-permissions`, no
+sandbox, as Codex runs. Like OpenCode, it reads no global `CLAUDE.md`, so the
+prompt names the skill, and `ticket-flow` with the skills it calls must be
+symlinked into `~/.gemini/config/skills/`. The run log gets its tokens; its cost
+is `?`, since the Antigravity plan bills it and Google lists no API price.
 
 Codex stages run with `--dangerously-bypass-approvals-and-sandbox`: no sandbox
 and no approvals, so run the driver only on a machine set aside for the runs (the
