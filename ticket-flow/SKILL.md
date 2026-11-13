@@ -200,6 +200,12 @@ The `sweatshop` driver feeds bare ids to fresh sessions, one at a time, and read
 - **One stage per session.** Stage 2 stops the moment `to-review` is committed;
   judging the work is stage 3's. Stage 3 stops at `done`, `to-merge`,
   `to-implement` or `blocked`, nothing else.
+- **Stage 2 ends only at a handoff.** Its turn ends at `to-review`, at a
+  `blocked` the proxy escalated, or, in a ticket split into parts, at a gated
+  `Progresso:` part. A red test committed, part of the production written or
+  "progress recorded in the ticket" is not one: nobody continues it, the
+  driver counts the attempt as failed and parks the ticket after two. The
+  stage has hours, not minutes; keep going until the handoff.
 - **A retry resumes.** The driver writes `Attempt N failed: <reason>` under
   `## Comments`, and before retrying a stopped stage puts the branch's
   `implementing` back to `to-implement` (`reviewing` to `to-review`) with a
