@@ -6,7 +6,7 @@ Nine skills for coding agents. Provider-agnostic: a skill is a folder with a
 | Skill | What it does |
 | --- | --- |
 | [`audit`](audit/SKILL.md) | Whole-repo code audit ending in a verdict — Approved / Approved with cleanup / Not approved — and a written report under `docs/audits/`. Read-only except the report. |
-| [`standup`](standup/SKILL.md) | Project-state brief: what got done, what is open, what to pick up next. Reads the repo's local tracker (`.scratch/`) and git. Read-only, answers in chat. |
+| [`standup`](standup/SKILL.md) | Project-state brief: where the project stands and its next steps, in product terms (`/standup tickets` for the ticket queue). Reads the repo's local tracker (`.scratch/`) and git. Read-only, answers in chat. |
 | [`ticket-flow`](ticket-flow/SKILL.md) | The one-ticket-at-a-time build loop: stage 1 specifies, stage 2 implements test-first on a branch named for the id, stage 3 reviews and merges. Dispatches a bare ticket id on its `Stage:` line. Needs a repo with a local tracker (`docs/agents/issue-tracker.md`) and a bindings block in `AGENTS.md`. |
 | [`foreman`](foreman/SKILL.md) | Supervises one `sweatshop` run: standup, a background driver, 30-minute check-ins, crash handling, and a closing summary for the human. |
 | [`scout`](scout/SKILL.md) | Says which `sweatshop` lanes can start now beside the running ones: work ready, no driver on the clone, no overlap in `Primary files`. Read-only, launches nothing. |

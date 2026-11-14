@@ -1,13 +1,13 @@
 ---
 name: "standup"
-description: "Project-state brief at the start of a work session: what was done recently, what is open, what to pick up next. Use when the user asks for a standup, \"where were we\", \"what's the state of the project\", or invokes /standup. Reads the repo's local issue tracker (.scratch/) and git; not a daily/calendar brief."
+description: "Project-state brief at the start of a work session: where the project stands and its next steps, in product terms rather than tickets. Use when the user asks for a standup, \"where were we\", \"what's the state of the project\", or invokes /standup. Reads the repo's local issue tracker (.scratch/) and git; not a daily/calendar brief."
 ---
 
 # Standup
 
-Answer the three standup questions for the current repo: what got done, what is in
-progress or open, what comes next. Read-only apart from `git pull --ff-only`. Output
-in chat, not a file.
+Say where the project stands and what comes next, in product terms: features, units
+and milestones, not ticket IDs. The tracker and git are the evidence; the brief is the
+output. Read-only apart from `git pull --ff-only`. Output in chat, not a file.
 
 ## Where the facts come from
 
@@ -24,7 +24,7 @@ in chat, not a file.
      base; otherwise `<base>` is. Read the tracker from the loop's base —
      `git ls-tree -r --name-only <loop base> -- .scratch/` to list,
      `git show <loop base>:<path>` to read — never from the working tree unless it
-     is the loop's base checked out. Name an open session in **In progress** with
+     is the loop's base checked out. Note an open session with
      `git rev-list --count <base>..<session>` commits ahead. Lane sessions
      (`sweatshop/<lane>/<stamp>`) can be open side by side: each is the loop's base
      for the tickets in `.scratch/<lane>/`; read every other ticket from `<base>`.
@@ -41,8 +41,7 @@ in chat, not a file.
      its dependents.
    - **Everything else.** Any other branch in
      `git branch -a --no-merged <loop base>` is unmerged work the tracker does not
-     name. List them in one line under **In progress** with commits ahead; do not
-     read their diffs.
+     name. Note them with commits ahead; do not read their diffs.
 3. **Tracker.** The standard layout is `.scratch/<feature>/` with `spec.md`, one ticket
    per file under `issues/`, and optionally `ledger.md`. Ticket filenames vary by repo
    (`NN-slug.md`, `KEY-N-slug.md`, …); read `docs/agents/issue-tracker.md` for the repo's own convention when it exists.
@@ -77,7 +76,7 @@ in chat, not a file.
      Missing Priority and directory names do not establish acceptance. An explicit
      runnable `Stage` with satisfied blockers remains work; a contradictory
      deferral marker requires correction, not silent removal from the queue.
-     Count genuinely deferred tickets separately in **Open**.
+     Genuinely deferred tickets are parked work, not queue.
 5. **Git.** The refresh in step 2: if `git pull --ff-only` fails (no upstream,
    diverged branch, dirty tree), say so in one line and read the state as-is; never
    force, merge or stash to make it succeed.
@@ -91,66 +90,58 @@ in chat, not a file.
    recently touched feature is fully closed, the active feature is the first one in
    dependency order with open tickets.
 
-7. **Overview sources.** For the overview block (see Output): the merged PRs of the
-   last ~7 days (`git log --since=<7 days ago> --merges --format='%ad %s'
-   --date=short <base>`) say which features moved; the first lines of each moved or
-   active feature's `spec.md` say what that feature is; for open tickets, the title
-   and the "why it is parked" section (whatever the repo calls it) say what is left
-   and why it waits. Read only those parts, not the whole spec.
+7. **Brief sources.** The merged PRs of the last ~7 days (`git log --since=<7 days
+   ago> --merges --format='%ad %s' --date=short <base>`) say which features moved;
+   the first lines of each moved or active feature's `spec.md` say what that feature
+   is; for open tickets, the title and the "why it is parked" section (whatever the
+   repo calls it) say what is left and why it waits. Read only those parts, not the
+   whole spec. Milestones past the tracker (the next units, the release, what waits
+   until after it) come from the roadmap or plan docs the project instructions name,
+   and from the user's memory when it records those decisions.
 
 Never read closed tickets' bodies for the brief; they are history, not state.
 
 ## Output
 
-Portuguese if the repo's docs are in Portuguese, otherwise English. An overview, then
-five short blocks, plain prose or one-line bullets, no headers wider than this:
+Portuguese if the repo's docs are in Portuguese, otherwise English, headers included.
+Two shapes:
 
-**Overview** — the project-level picture for a reader who does not track ticket IDs.
-Write it in plain prose with no ticket IDs or hashes. Name features, units and parts
-of the product the way the repo's docs do. Cover four things in 4–8 lines:
-- what moved in the last week, in terms of what the product can now do;
-- whether anything is running now;
-- what is left to close the current milestone (unit, feature, phase), in order;
-- what is parked on purpose, why, and what would bring it back (a decision, a
-  threshold, a review).
-End with what comes after the milestone.
+- **Ticket blocks** when `foreman` runs this as its step 1 or the user asks for the
+  tickets (`/standup tickets`, "which tickets"): the shape in [`tickets.md`](tickets.md).
+- **Project brief** otherwise, below.
 
-**Done** — the last 2–3 closed tickets or ledger entries, feature-level, with IDs and
-dates. Tickets only: no commit hashes, no housekeeping commits (step 6).
+### Project brief
 
-**In progress** — claimed/in-progress tickets, plus a dirty working tree if any.
+Written for a reader who does not track ticket IDs: no ticket IDs, no hashes. Name
+features, units and parts of the product the way the repo's docs do. Every line is a
+short bullet, one idea, at most two lines. Under 30 lines, no preamble.
 
-**Open** — count of open tickets per feature, and the count must equal the number of
-open ticket files you saw; name the top 3 by priority/dependency order.
+**Where we are**: 2–4 bullets. What moved in the last week, as what the product can
+now do; whether anything is running now; repo hygiene (dirty tree, local base behind
+its remote, stale branches) in one bullet, only when there is any.
 
-**Unblocked** — the open tickets as a tree, indented under what blocks them, so the
-reader gets the queue *and* why the rest waits. Roots are the tickets whose blockers are
-all closed — that is the work queue. Under a `blocked` or `to-merge` node, add the last
-`## Comments` line: it is the question waiting on a human. On a repeat (a ticket with
-several blockers) print `ID ...` rather than re-expanding it.
+**Next steps**: a numbered list, in order. First the steps that close the current
+milestone (unit, feature, phase), each one a product step that groups its tickets
+("finish the houses of chapters 23–25", never one line per ticket). Then the
+milestones after it, up to the release and what waits until after it. Each item: the
+step in bold, then what it involves and what it waits on (a human decision, a review,
+a device check). When steps come from outside the tracker (step 7), close the list
+with one line saying which.
 
-```
-DEP-006       to-review
-  DEP-001     blocked
-  > axios 1.20 declares ...
-    QA-001    to-implement
-CLEAN-003     to-implement
-```
+**Parked**: one bullet per item parked on purpose: what, why, and what would bring
+it back (a decision, a threshold, a review). Accepted debt goes here.
 
-This block is mandatory. Accepted debt stays out of it (step 4).
+End with one line: the ticket queue is behind `/standup tickets`.
 
-**Next step** — one recommendation: the first open, unblocked ticket in dependency
-order, with its path. If nothing is open: say the tracker is empty and offer three
-concrete options (code audit, bug hunt against a named area, new feature from the
-spec) — do not invent tickets.
-
-Under 40 lines total, overview included. No preamble, no restating the layout.
+An empty tracker still gets the brief, with next steps from step 7's sources; when
+those name nothing, offer three concrete options (code audit, bug hunt against a named
+area, new feature from the spec) rather than inventing work.
 
 ## When the repo does not follow the layout
 
 If there is no `.scratch/` and project instructions name no tracker: report the last
-5 commits and the dirty tree (the overview becomes one line on what those commits
-did), then say in one line that there is no issue tracker to
+5 commits and the dirty tree (**Where we are** becomes one bullet on what those
+commits did), then say in one line that there is no issue tracker to
 read and point at the `.scratch/<feature>/issues/` one-file-per-ticket convention. Do not guess
 next steps from diffs.
 
